@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Trim Video Pro",
+  "description": "Offline video trimming and splitting tool by time or clip count with Khmer and English language support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
