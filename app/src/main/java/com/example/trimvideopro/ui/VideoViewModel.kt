@@ -2,10 +2,14 @@ package com.example.trimvideopro.ui
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.trimvideopro.localization.AppLanguage
@@ -14,7 +18,12 @@ import com.example.trimvideopro.localization.KhmerStrings
 import com.example.trimvideopro.model.ClipSegment
 import com.example.trimvideopro.model.ProcessedVideo
 import com.example.trimvideopro.model.SplitMode
+import com.example.trimvideopro.model.Transcript
+import com.example.trimvideopro.model.TranscriptChunk
+import com.example.trimvideopro.model.TranscriptConfig
+import com.example.trimvideopro.model.TranscriptStatus
 import com.example.trimvideopro.model.VideoMetadata
+import com.example.trimvideopro.processor.TranscriptProcessor
 import com.example.trimvideopro.processor.VideoProcessor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +55,14 @@ data class VideoUiState(
     val totalClipsToProcess: Int = 1,
     val processingProgress: Float = 0f,
     val statusMessage: String? = null,
+    
+    // Transcript state
+    val transcriptStatus: TranscriptStatus = TranscriptStatus.Idle,
+    val transcript: Transcript? = null,
+    val transcriptProgress: Float = 0f,
+    val transcriptProgressMessage: String = "",
+    val showTranscriptDialog: Boolean = false,
+    val selectedTranscriptChunk: TranscriptChunk? = null,
     
     // Exported videos
     val exportedVideos: List<ProcessedVideo> = emptyList(),
@@ -484,6 +501,221 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
 
             list.sortByDescending { it.timestampMs }
             _uiState.update { it.copy(exportedVideos = list) }
+        }
+    }
+
+    // ========== Transcript Functions ==========
+
+    fun generateTranscript(context: Context, language: String = "en") {
+        val uri = _uiState.value.selectedVideoUri ?: return
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    transcriptStatus = TranscriptStatus.ExtractingAudio,
+                    transcriptProgress = 0f,
+                    transcriptProgressMessage = strings.extractingAudio
+                )
+            }
+
+            val config = TranscriptConfig(language = language)
+            val result = TranscriptProcessor.generateTranscript(
+                context = context,
+                videoUri = uri,
+                config = config
+            ) { progress, message ->
+                _uiState.update {
+                    it.copy(
+                        transcriptProgress = progress,
+                        transcriptProgressMessage = message
+                    )
+                }
+            }
+
+            if (result != null) {
+                _uiState.update {
+                    it.copy(
+                        transcriptStatus = TranscriptStatus.Success(result),
+                        transcript = result,
+                        transcriptProgress = 1f,
+                        transcriptProgressMessage = strings.transcriptComplete
+                    )
+                }
+                Toast.makeText(context, strings.transcriptComplete, Toast.LENGTH_SHORT).show()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        transcriptStatus = TranscriptStatus.Error(strings.transcriptError),
+                        transcriptProgress = 0f,
+                        transcriptProgressMessage = strings.transcriptError
+                    )
+                }
+                Toast.makeText(context, strings.transcriptError, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun showTranscriptDialog(show: Boolean) {
+        _uiState.update { it.copy(showTranscriptDialog = show) }
+    }
+
+    fun selectTranscriptChunk(chunk: TranscriptChunk?) {
+        _uiState.update { it.copy(selectedTranscriptChunk = chunk) }
+    }
+
+    fun exportTranscriptToSrt(context: Context) {
+        val transcript = _uiState.value.transcript ?: return
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+
+        viewModelScope.launch {
+            try {
+                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
+                if (!outputDir.exists()) outputDir.mkdirs()
+
+                val fileName = "transcript_${System.currentTimeMillis() % 10000}.srt"
+                val outputFile = File(outputDir, fileName)
+
+                val success = TranscriptProcessor.exportToSrt(transcript, outputFile.absolutePath)
+                if (success) {
+                    // Also save to Downloads folder
+                    saveToDownloads(context, outputFile, "srt")
+                    Toast.makeText(context, strings.srtExportedSuccess, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun exportTranscriptToVtt(context: Context) {
+        val transcript = _uiState.value.transcript ?: return
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+
+        viewModelScope.launch {
+            try {
+                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
+                if (!outputDir.exists()) outputDir.mkdirs()
+
+                val fileName = "transcript_${System.currentTimeMillis() % 10000}.vtt"
+                val outputFile = File(outputDir, fileName)
+
+                val success = TranscriptProcessor.exportToVtt(transcript, outputFile.absolutePath)
+                if (success) {
+                    saveToDownloads(context, outputFile, "vtt")
+                    Toast.makeText(context, strings.vttExportedSuccess, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun exportTranscriptToText(context: Context) {
+        val transcript = _uiState.value.transcript ?: return
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+
+        viewModelScope.launch {
+            try {
+                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
+                if (!outputDir.exists()) outputDir.mkdirs()
+
+                val fileName = "transcript_${System.currentTimeMillis() % 10000}.txt"
+                val outputFile = File(outputDir, fileName)
+
+                val success = TranscriptProcessor.exportToTextWithTimestamps(transcript, outputFile.absolutePath)
+                if (success) {
+                    saveToDownloads(context, outputFile, "txt")
+                    Toast.makeText(context, strings.txtExportedSuccess, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun shareTranscript(context: Context) {
+        val transcript = _uiState.value.transcript ?: return
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+
+        try {
+            val shareText = buildString {
+                appendLine("📝 Video Transcript")
+                appendLine("==================")
+                appendLine()
+                transcript.chunks.forEach { chunk ->
+                    appendLine("[${formatTimestamp(chunk.startMs)}] ${chunk.text}")
+                }
+            }
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, strings.shareTranscript)
+                putExtra(Intent.EXTRA_TEXT, shareText)
+            }
+            context.startActivity(Intent.createChooser(intent, strings.shareTranscript))
+        } catch (e: Exception) {
+            Toast.makeText(context, strings.errorSharing, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveToDownloads(context: Context, sourceFile: File, extension: String) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, sourceFile.name)
+                    put(MediaStore.Downloads.MIME_TYPE, when (extension) {
+                        "srt" -> "application/x-subrip"
+                        "vtt" -> "text/vtt"
+                        else -> "text/plain"
+                    })
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/TrimVideoPro/Transcripts")
+                }
+
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                uri?.let {
+                    resolver.openOutputStream(it)?.use { outputStream ->
+                        sourceFile.inputStream().use { inputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                }
+            } else {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val trimDir = File(downloadsDir, "TrimVideoPro/Transcripts")
+                if (!trimDir.exists()) trimDir.mkdirs()
+                val destFile = File(trimDir, sourceFile.name)
+                sourceFile.copyTo(destFile, overwrite = true)
+            }
+        } catch (e: Exception) {
+            // Silently fail, file is already saved to app directory
+        }
+    }
+
+    private fun formatTimestamp(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    fun clearTranscript() {
+        _uiState.update {
+            it.copy(
+                transcriptStatus = TranscriptStatus.Idle,
+                transcript = null,
+                transcriptProgress = 0f,
+                transcriptProgressMessage = "",
+                selectedTranscriptChunk = null
+            )
         }
     }
 }

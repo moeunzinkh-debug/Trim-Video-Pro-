@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.ViewStream
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,11 +85,13 @@ import com.example.trimvideopro.ui.components.ExportHistoryView
 import com.example.trimvideopro.ui.components.SplitConfigView
 import com.example.trimvideopro.ui.components.SurfaceBadge
 import com.example.trimvideopro.ui.components.TimelineTrimSlider
+import com.example.trimvideopro.ui.components.TranscriptView
 import com.example.trimvideopro.ui.components.VideoPlayerView
 
 enum class AppTab {
     TRIM,
     SPLIT,
+    TRANSCRIPT,
     HISTORY
 }
 
@@ -187,6 +190,12 @@ fun TrimVideoApp(
                         onClick = { selectedTab = AppTab.SPLIT },
                         icon = { Icon(Icons.Default.ViewStream, contentDescription = null) },
                         label = { Text(strings.tabSplit, fontSize = 12.sp) }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == AppTab.TRANSCRIPT,
+                        onClick = { selectedTab = AppTab.TRANSCRIPT },
+                        icon = { Icon(Icons.Default.ClosedCaption, contentDescription = null) },
+                        label = { Text(strings.tabTranscript, fontSize = 12.sp) }
                     )
                     NavigationBarItem(
                         selected = selectedTab == AppTab.HISTORY,
@@ -374,6 +383,30 @@ fun TrimVideoApp(
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
+                        }
+                    }
+
+                    AppTab.TRANSCRIPT -> {
+                        if (state.selectedVideoUri != null) {
+                            TranscriptView(
+                                transcript = state.transcript,
+                                transcriptStatus = state.transcriptStatus,
+                                transcriptProgress = state.transcriptProgress,
+                                transcriptProgressMessage = state.transcriptProgressMessage,
+                                selectedChunk = state.selectedTranscriptChunk,
+                                onGenerateTranscript = { language ->
+                                    viewModel.generateTranscript(context, language)
+                                },
+                                onChunkSelected = { chunk ->
+                                    viewModel.selectTranscriptChunk(chunk)
+                                    // Update trim range to the selected chunk's timestamps
+                                    viewModel.updateTrimRange(chunk.startMs, chunk.endMs)
+                                },
+                                onExportSrt = { viewModel.exportTranscriptToSrt(context) },
+                                onExportVtt = { viewModel.exportTranscriptToVtt(context) },
+                                onExportText = { viewModel.exportTranscriptToText(context) },
+                                onShare = { viewModel.shareTranscript(context) }
+                            )
                         }
                     }
 
