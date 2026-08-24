@@ -361,7 +361,8 @@ object TranscriptProcessor {
         
         segments.forEachIndexed { index, text ->
             // Estimate segment duration based on text length
-            val estimatedDuration = (avgSegmentDuration * (text.length.toFloat() / 50f))
+            val estimatedDuration = (avgSegmentDuration.toDouble() * (text.length / 50.0))
+                .toLong()
                 .coerceIn(1000L, chunkDurationMs * 2)
             
             val endTime = (currentTimeMs + estimatedDuration).coerceAtMost(totalDurationMs)

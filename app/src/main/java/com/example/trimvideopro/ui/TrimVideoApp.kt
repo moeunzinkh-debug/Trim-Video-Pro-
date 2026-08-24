@@ -83,7 +83,6 @@ import com.example.trimvideopro.processor.VideoProcessor
 import com.example.trimvideopro.ui.components.ApkBuildGuideDialog
 import com.example.trimvideopro.ui.components.ExportHistoryView
 import com.example.trimvideopro.ui.components.SplitConfigView
-import com.example.trimvideopro.ui.components.SurfaceBadge
 import com.example.trimvideopro.ui.components.TimelineTrimSlider
 import com.example.trimvideopro.ui.components.TranscriptView
 import com.example.trimvideopro.ui.components.VideoPlayerView
