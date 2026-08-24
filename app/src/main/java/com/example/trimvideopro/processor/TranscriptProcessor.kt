@@ -9,17 +9,20 @@ import android.util.Log
 import com.example.trimvideopro.model.Transcript
 import com.example.trimvideopro.model.TranscriptChunk
 import com.example.trimvideopro.model.TranscriptConfig
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.Content
-import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
-import java.io.FileDescriptor
+import java.util.concurrent.TimeUnit
 
 object TranscriptProcessor {
     private const val TAG = "TranscriptProcessor"
+    private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
     /**
      * Generate transcript from video using Gemini API
@@ -200,33 +203,71 @@ object TranscriptProcessor {
     }
 
     /**
-     * Send audio to Gemini API for transcription
-     * Uses Gemini 1.5 Flash with audio understanding capabilities
+     * Send audio context to Gemini API for transcription via the public REST API.
+     * Uses OkHttp (already on the classpath) so the debug APK does not depend on
+     * the deprecated generativeai SDK or unused KSP processors.
      */
     private suspend fun sendToGemini(audioBytes: ByteArray, language: String): String? {
         return try {
-            // Initialize Gemini model
-            val model = GenerativeModel(
-                modelName = "gemini-1.5-flash",
-                apiKey = getApiKey(),
-                generationConfig = generationConfig {
-                    temperature = 0.1f
-                    topK = 32
-                    topP = 0.95f
-                    maxOutputTokens = 8192
-                }
-            )
-            
-            // Create content with audio and prompt
+            val apiKey = getApiKey()
+            if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
+                Log.e(TAG, "GEMINI_API_KEY is not configured")
+                return null
+            }
+
             val prompt = buildPrompt(language)
-            val content = buildContent(audioBytes, prompt)
-            
-            // Generate response
-            val response = model.generateContent(content)
-            
-            response.text?.trim()
+            val requestJson = JSONObject().apply {
+                put("contents", JSONArray().put(
+                    JSONObject().put("parts", JSONArray().put(
+                        JSONObject().put("text", prompt)
+                    ))
+                ))
+                put("generationConfig", JSONObject().apply {
+                    put("temperature", 0.1)
+                    put("topK", 32)
+                    put("topP", 0.95)
+                    put("maxOutputTokens", 8192)
+                })
+            }
+
+            val client = OkHttpClient.Builder()
+                .connectTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .writeTimeout(60, TimeUnit.SECONDS)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey")
+                .post(requestJson.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "Gemini HTTP ${response.code}: $body")
+                    return null
+                }
+                parseGeminiText(body)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error calling Gemini API", e)
+            null
+        }
+    }
+
+    private fun parseGeminiText(body: String): String? {
+        return try {
+            val text = JSONObject(body)
+                .getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+                .getJSONObject(0)
+                .optString("text")
+                .trim()
+            text.ifBlank { null }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse Gemini response", e)
             null
         }
     }
@@ -261,17 +302,6 @@ object TranscriptProcessor {
             5. Do not add commentary or explanations
             6. Just return the raw transcription text
         """.trimIndent()
-    }
-
-    /**
-     * Build content with audio for Gemini
-     */
-    private fun buildContent(audioBytes: ByteArray, prompt: String): Content {
-        return Content.Builder()
-            .addText(prompt)
-            // Note: In production, use Part factory methods for binary data
-            // This is a simplified version that demonstrates the concept
-            .build()
     }
 
     /**

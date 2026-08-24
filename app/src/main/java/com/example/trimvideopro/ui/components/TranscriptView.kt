@@ -34,6 +34,7 @@ import com.example.trimvideopro.model.TranscriptChunk
 import com.example.trimvideopro.model.TranscriptStatus
 import com.example.trimvideopro.processor.VideoProcessor
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranscriptView(
     transcript: Transcript?,
