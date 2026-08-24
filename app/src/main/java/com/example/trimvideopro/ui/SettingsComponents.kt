@@ -3,6 +3,9 @@ package com.example.trimvideopro.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -16,6 +19,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,9 +37,13 @@ fun SettingsBottomSheet(
     onShareWithFriends: () -> Unit,
     onOpenFeedback: () -> Unit,
     onOpenAboutUs: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    currentApiKey: String = "",
+    onSaveApiKey: (String) -> Unit = {}
 ) {
     val strings = LocalAppStrings.current
+    var apiKey by remember(currentApiKey) { mutableStateOf(currentApiKey) }
+    var showApiKey by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -44,6 +54,7 @@ fun SettingsBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -75,7 +86,7 @@ fun SettingsBottomSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
 
-            // 1. Language selector
+            // Language selector. Only English and Khmer are supported.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,7 +114,7 @@ fun SettingsBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AppLanguage.values().forEach { lang ->
+                    AppLanguage.entries.forEach { lang ->
                         val isSelected = lang == currentLanguage
                         FilterChip(
                             selected = isSelected,
@@ -121,7 +132,92 @@ fun SettingsBottomSheet(
                 }
             }
 
-            // 2. Clear cache
+            // Gemini API key
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Key,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = strings.geminiApiKey,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    if (currentApiKey.isNotBlank()) {
+                        Spacer(modifier = Modifier.weight(1f))
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = strings.apiKeySaved,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+                Text(
+                    text = strings.geminiApiKeyDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("api_key_input"),
+                    label = { Text(strings.geminiApiKey) },
+                    placeholder = { Text(strings.geminiApiKeyHint) },
+                    singleLine = true,
+                    visualTransformation = if (showApiKey) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { showApiKey = !showApiKey }) {
+                            Icon(
+                                imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (showApiKey) "Hide API key" else "Show API key"
+                            )
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { apiKey = ""; onSaveApiKey("") },
+                        enabled = apiKey.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(strings.clearApiKey)
+                    }
+                    Button(
+                        onClick = { onSaveApiKey(apiKey) },
+                        enabled = apiKey.isNotBlank(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("save_api_key_button")
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.saveApiKey)
+                    }
+                }
+            }
+
             SettingsItemRow(
                 icon = Icons.Default.CleaningServices,
                 title = strings.clearCache,
@@ -130,7 +226,6 @@ fun SettingsBottomSheet(
                 onClick = onClearCache
             )
 
-            // 3. Share with your friend 🥰
             SettingsItemRow(
                 icon = Icons.Default.Favorite,
                 title = strings.shareWithFriends,
@@ -140,7 +235,6 @@ fun SettingsBottomSheet(
                 onClick = onShareWithFriends
             )
 
-            // 4. Feedback
             SettingsItemRow(
                 icon = Icons.Default.Feedback,
                 title = strings.feedback,
@@ -149,7 +243,6 @@ fun SettingsBottomSheet(
                 onClick = onOpenFeedback
             )
 
-            // 5. About us
             SettingsItemRow(
                 icon = Icons.Default.Info,
                 title = strings.aboutUs,

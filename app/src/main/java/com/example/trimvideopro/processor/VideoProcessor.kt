@@ -38,11 +38,16 @@ object VideoProcessor {
             val widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
             val heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
             val rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-            val mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: "video/mp4"
+            val mimeType = (
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                    ?: context.contentResolver.getType(uri)
+                    ?: "video/mp4"
+                ).lowercase()
+            val isAudio = mimeType.startsWith("audio/")
 
             val durationMs = durationStr?.toLongOrNull() ?: 0L
-            var width = widthStr?.toIntOrNull() ?: 1280
-            var height = heightStr?.toIntOrNull() ?: 720
+            var width = if (isAudio) 0 else widthStr?.toIntOrNull() ?: 1280
+            var height = if (isAudio) 0 else heightStr?.toIntOrNull() ?: 720
             val rotation = rotationStr?.toIntOrNull() ?: 0
 
             // Swap dimensions if rotated 90 or 270 degrees
@@ -57,7 +62,8 @@ object VideoProcessor {
                 fileSize = pfd.statSize
             }
 
-            val fileName = getFileNameFromUri(context, uri) ?: "Selected_Video.mp4"
+            val fileName = getFileNameFromUri(context, uri)
+                ?: if (isAudio) "Selected_Audio.m4a" else "Selected_Video.mp4"
 
             VideoMetadata(
                 uri = uri,

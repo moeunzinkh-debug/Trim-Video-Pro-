@@ -24,6 +24,7 @@ import com.example.trimvideopro.model.TranscriptStatus
 import com.example.trimvideopro.model.VideoMetadata
 import com.example.trimvideopro.processor.TranscriptProcessor
 import com.example.trimvideopro.processor.VideoProcessor
+import com.example.trimvideopro.settings.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,8 +33,10 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class VideoUiState(
-    val language: AppLanguage = AppLanguage.ENGLISH,
+    val language: AppLanguage = AppLanguage.fromLocale(),
     val selectedVideoUri: Uri? = null,
+    /** True when a user-provided Gemini key is saved in private app preferences. */
+    val apiKeyConfigured: Boolean = false,
     val metadata: VideoMetadata? = null,
     val isExtractingMetadata: Boolean = false,
     val previewThumbnail: Bitmap? = null,
@@ -79,16 +82,42 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<VideoUiState> = _uiState.asStateFlow()
 
     init {
+        val context = getApplication<Application>()
+        val savedLanguage = AppPreferences.getLanguage(context) ?: AppLanguage.fromLocale()
+        _uiState.update {
+            it.copy(
+                language = savedLanguage,
+                apiKeyConfigured = AppPreferences.getSavedApiKey(context).isNotBlank()
+            )
+        }
         loadExportedVideos()
     }
 
     fun toggleLanguage() {
-        val nextLang = if (_uiState.value.language == AppLanguage.ENGLISH) AppLanguage.KHMER else AppLanguage.ENGLISH
-        _uiState.update { it.copy(language = nextLang) }
+        val nextLang = if (_uiState.value.language == AppLanguage.ENGLISH) {
+            AppLanguage.KHMER
+        } else {
+            AppLanguage.ENGLISH
+        }
+        setLanguage(nextLang)
     }
 
     fun setLanguage(language: AppLanguage) {
+        AppPreferences.saveLanguage(getApplication(), language)
         _uiState.update { it.copy(language = language) }
+        recalculateSegments()
+    }
+
+    fun saveGeminiApiKey(context: Context, apiKey: String) {
+        val cleanedKey = apiKey.trim()
+        AppPreferences.saveApiKey(context, cleanedKey)
+        _uiState.update { it.copy(apiKeyConfigured = cleanedKey.isNotBlank()) }
+        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
+        Toast.makeText(
+            context,
+            if (cleanedKey.isBlank()) strings.apiKeyCleared else strings.apiKeySaved,
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     fun selectVideo(context: Context, uri: Uri) {
@@ -100,10 +129,25 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } catch (ignored: Exception) {
             }
-            _uiState.update { it.copy(isExtractingMetadata = true, selectedVideoUri = uri, statusMessage = null) }
+            _uiState.update {
+                it.copy(
+                    isExtractingMetadata = true,
+                    selectedVideoUri = uri,
+                    metadata = null,
+                    previewThumbnail = null,
+                    transcriptStatus = TranscriptStatus.Idle,
+                    transcript = null,
+                    selectedTranscriptChunk = null,
+                    statusMessage = null
+                )
+            }
             val meta = VideoProcessor.extractMetadata(context, uri)
             if (meta != null) {
-                val thumb = VideoProcessor.extractThumbnail(context, uri, positionMs = meta.durationMs / 4)
+                val thumb = if (meta.mimeType.startsWith("audio/")) {
+                    null
+                } else {
+                    VideoProcessor.extractThumbnail(context, uri, positionMs = meta.durationMs / 4)
+                }
                 _uiState.update {
                     it.copy(
                         metadata = meta,
@@ -505,7 +549,7 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
 
     // ========== Transcript Functions ==========
 
-    fun generateTranscript(context: Context, language: String = "en") {
+    fun generateTranscript(context: Context, language: String = "auto") {
         val uri = _uiState.value.selectedVideoUri ?: return
         val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
 
@@ -518,7 +562,12 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            val config = TranscriptConfig(language = language)
+            val requestedLanguage = when (language.lowercase()) {
+                "en", "english" -> "en"
+                "km", "khmer" -> "km"
+                else -> "auto"
+            }
+            val config = TranscriptConfig(language = requestedLanguage)
             val result = TranscriptProcessor.generateTranscript(
                 context = context,
                 videoUri = uri,
@@ -645,7 +694,7 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
 
         try {
             val shareText = buildString {
-                appendLine("📝 Video Transcript")
+                appendLine("📝 Media Transcript")
                 appendLine("==================")
                 appendLine()
                 transcript.chunks.forEach { chunk ->

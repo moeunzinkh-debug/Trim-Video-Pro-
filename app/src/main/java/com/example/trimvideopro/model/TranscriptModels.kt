@@ -26,12 +26,13 @@ data class TranscriptChunk(
 }
 
 /**
- * Represents the complete transcript of a video
+ * Represents the complete transcript of a video or audio file
  */
 data class Transcript(
     val videoUri: String,
     val chunks: List<TranscriptChunk>,
-    val language: String = "en",
+    /** en, km, or auto (automatic detection limited to English and Khmer). */
+    val language: String = "auto",
     val generatedAt: Long = System.currentTimeMillis()
 ) {
     fun toSrtFormat(): String {
@@ -65,7 +66,8 @@ sealed class TranscriptStatus {
  * Configuration for transcript generation
  */
 data class TranscriptConfig(
-    val language: String = "en",
+    /** en, km, or auto (automatic detection limited to English and Khmer). */
+    val language: String = "auto",
     val chunkDurationMs: Long = 5000L, // Default 5 second chunks
     val includeTimestamps: Boolean = true
 )

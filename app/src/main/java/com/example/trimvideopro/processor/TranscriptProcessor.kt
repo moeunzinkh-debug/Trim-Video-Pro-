@@ -1,16 +1,16 @@
 package com.example.trimvideopro.processor
 
 import android.content.Context
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMuxer
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import com.example.trimvideopro.model.Transcript
 import com.example.trimvideopro.model.TranscriptChunk
 import com.example.trimvideopro.model.TranscriptConfig
+import com.example.trimvideopro.settings.AppPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -18,14 +18,22 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+/** Handles media transcription and transcript export. */
 object TranscriptProcessor {
     private const val TAG = "TranscriptProcessor"
+    private const val GEMINI_MODEL = "gemini-2.0-flash"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
     /**
-     * Generate transcript from video using Gemini API
+     * Transcribes either a video or an audio document selected by the user.
+     *
+     * The original implementation extracted an audio track and then sent only a
+     * prompt to Gemini, so Gemini never received the media. Sending the selected
+     * media as inline data preserves audio-only files and also lets Gemini inspect
+     * the audio track of videos.
      */
     suspend fun generateTranscript(
         context: Context,
@@ -34,58 +42,48 @@ object TranscriptProcessor {
         onProgress: (Float, String) -> Unit
     ): Transcript? = withContext(Dispatchers.IO) {
         try {
-            onProgress(0.1f, "Extracting audio from video...")
-            
-            // Step 1: Extract audio from video
-            val audioFile = extractAudioFromVideo(context, videoUri)
-            if (audioFile == null || !audioFile.exists()) {
-                Log.e(TAG, "Failed to extract audio from video")
+            val apiKey = getApiKey(context)
+            if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
+                Log.e(TAG, "Gemini API key is not configured")
                 return@withContext null
             }
-            
-            onProgress(0.3f, "Converting audio format...")
-            
-            // Step 2: Convert audio to WAV format (16-bit PCM) for Gemini compatibility
-            val wavFile = convertToWav(context, audioFile)
-            audioFile.delete()
-            
-            if (wavFile == null || !wavFile.exists()) {
-                Log.e(TAG, "Failed to convert audio to WAV")
+
+            val mimeType = resolveMediaMimeType(context, videoUri)
+            if (!mimeType.startsWith("audio/") && !mimeType.startsWith("video/")) {
+                Log.e(TAG, "Unsupported transcript media type: $mimeType")
                 return@withContext null
             }
-            
-            onProgress(0.5f, "Reading audio data...")
-            
-            // Step 3: Read audio bytes
-            val audioBytes = wavFile.readBytes()
-            wavFile.delete()
-            
-            if (audioBytes.isEmpty()) {
-                Log.e(TAG, "Audio file is empty")
+
+            onProgress(0.12f, "Reading media...")
+            val mediaBytes = context.contentResolver.openInputStream(videoUri)?.use { it.readBytes() }
+                ?: return@withContext null
+            if (mediaBytes.isEmpty()) {
+                Log.e(TAG, "Selected media is empty")
                 return@withContext null
             }
-            
-            onProgress(0.6f, "Sending to Gemini API for transcription...")
-            
-            // Step 4: Send to Gemini API
-            val transcriptText = sendToGemini(audioBytes, config.language)
-            if (transcriptText == null) {
-                Log.e(TAG, "Failed to get response from Gemini API")
-                return@withContext null
-            }
-            
-            onProgress(0.8f, "Processing transcript with timestamps...")
-            
-            // Step 5: Parse transcript and create chunks with timestamps
-            val durationMs = getAudioDuration(context, videoUri)
-            val chunks = parseTranscriptWithTimestamps(transcriptText, durationMs, config.chunkDurationMs)
-            
+
+            onProgress(0.35f, "Sending media to Gemini AI...")
+            val transcriptText = sendToGemini(
+                apiKey = apiKey,
+                mediaBytes = mediaBytes,
+                mimeType = mimeType,
+                language = config.language
+            ) ?: return@withContext null
+
+            onProgress(0.82f, "Adding transcript timestamps...")
+            val durationMs = getMediaDuration(context, videoUri)
+            val chunks = parseTranscriptWithTimestamps(
+                transcriptText = transcriptText,
+                totalDurationMs = durationMs,
+                chunkDurationMs = config.chunkDurationMs
+            )
+            if (chunks.isEmpty()) return@withContext null
+
             onProgress(1.0f, "Transcript generated successfully!")
-            
             Transcript(
                 videoUri = videoUri.toString(),
                 chunks = chunks,
-                language = config.language,
+                language = normalizeLanguage(config.language),
                 generatedAt = System.currentTimeMillis()
             )
         } catch (e: Exception) {
@@ -94,133 +92,27 @@ object TranscriptProcessor {
         }
     }
 
-    /**
-     * Extract audio track from video file
-     */
-    private fun extractAudioFromVideo(context: Context, videoUri: Uri): File? {
-        val outputDir = File(context.cacheDir, "transcript_temp")
-        if (!outputDir.exists()) outputDir.mkdirs()
-        
-        val outputFile = File(outputDir, "extracted_audio.m4a")
-        
-        val extractor = MediaExtractor()
-        var muxer: MediaMuxer? = null
-        var audioTrackIndex = -1
-        
-        try {
-            context.contentResolver.openFileDescriptor(videoUri, "r")?.use { pfd ->
-                extractor.setDataSource(pfd.fileDescriptor)
-                
-                // Find audio track
-                for (i in 0 until extractor.trackCount) {
-                    val format = extractor.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME)
-                    if (mime?.startsWith("audio/") == true) {
-                        audioTrackIndex = i
-                        break
-                    }
-                }
-                
-                if (audioTrackIndex == -1) {
-                    Log.e(TAG, "No audio track found in video")
-                    return null
-                }
-                
-                // Create muxer for audio extraction
-                muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                val audioFormat = extractor.getTrackFormat(audioTrackIndex)
-                val muxerTrackIndex = muxer!!.addTrack(audioFormat)
-                
-                muxer!!.start()
-                extractor.selectTrack(audioTrackIndex)
-                
-                val buffer = java.nio.ByteBuffer.allocate(1024 * 1024) // 1MB buffer
-                val bufferInfo = android.media.MediaCodec.BufferInfo()
-                
-                while (true) {
-                    val sampleSize = extractor.readSampleData(buffer, 0)
-                    if (sampleSize < 0) break
-                    
-                    bufferInfo.offset = 0
-                    bufferInfo.size = sampleSize
-                    bufferInfo.presentationTimeUs = extractor.sampleTime
-                    bufferInfo.flags = extractor.sampleFlags
-                    
-                    muxer!!.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
-                    extractor.advance()
-                }
-                
-                muxer!!.stop()
-            }
-            
-            return if (outputFile.exists() && outputFile.length() > 0) outputFile else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error extracting audio", e)
-            outputFile.delete()
-            return null
-        } finally {
-            try {
-                muxer?.release()
-            } catch (ignored: Exception) {}
-            extractor.release()
-        }
-    }
-
-    /**
-     * Convert audio to WAV format for Gemini API compatibility
-     */
-    private fun convertToWav(context: Context, inputFile: File): File? {
-        // For simplicity, we'll return the original file if it's already in a compatible format
-        // In a production app, you would use FFmpeg or similar for proper conversion
+    private fun sendToGemini(
+        apiKey: String,
+        mediaBytes: ByteArray,
+        mimeType: String,
+        language: String
+    ): String? {
         return try {
-            // Check if the file is small enough (Gemini has a size limit)
-            if (inputFile.length() > 10 * 1024 * 1024) { // 10MB limit
-                Log.w(TAG, "Audio file too large, will be truncated")
-            }
-            inputFile
-        } catch (e: Exception) {
-            Log.e(TAG, "Error preparing audio for Gemini", e)
-            null
-        }
-    }
-
-    /**
-     * Get audio/video duration in milliseconds
-     */
-    private fun getAudioDuration(context: Context, uri: Uri): Long {
-        try {
-            val retriever = android.media.MediaMetadataRetriever()
-            retriever.setDataSource(context, uri)
-            val duration = retriever.extractMetadata(
-                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
-            )?.toLongOrNull() ?: 0L
-            retriever.release()
-            return duration
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting duration", e)
-            return 0L
-        }
-    }
-
-    /**
-     * Send audio context to Gemini API for transcription via the public REST API.
-     * Uses OkHttp (already on the classpath) so the debug APK does not depend on
-     * the deprecated generativeai SDK or unused KSP processors.
-     */
-    private suspend fun sendToGemini(audioBytes: ByteArray, language: String): String? {
-        return try {
-            val apiKey = getApiKey()
-            if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
-                Log.e(TAG, "GEMINI_API_KEY is not configured")
-                return null
-            }
-
-            val prompt = buildPrompt(language)
+            val encodedMedia = Base64.encodeToString(mediaBytes, Base64.NO_WRAP)
             val requestJson = JSONObject().apply {
                 put("contents", JSONArray().put(
-                    JSONObject().put("parts", JSONArray().put(
-                        JSONObject().put("text", prompt)
-                    ))
+                    JSONObject().put("parts", JSONArray()
+                        .put(JSONObject().put("text", buildPrompt(language)))
+                        .put(
+                            JSONObject().put(
+                                "inline_data",
+                                JSONObject()
+                                    .put("mime_type", mimeType)
+                                    .put("data", encodedMedia)
+                            )
+                        )
+                    )
                 ))
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.1)
@@ -232,18 +124,24 @@ object TranscriptProcessor {
 
             val client = OkHttpClient.Builder()
                 .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(180, TimeUnit.SECONDS)
+                .writeTimeout(180, TimeUnit.SECONDS)
                 .build()
 
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_MODEL:generateContent"
+                .toHttpUrl()
+                .newBuilder()
+                .addQueryParameter("key", apiKey)
+                .build()
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey")
+                .url(endpoint)
                 .post(requestJson.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    // Do not log the request URL: it contains the user's API key.
                     Log.e(TAG, "Gemini HTTP ${response.code}: $body")
                     return null
                 }
@@ -257,14 +155,23 @@ object TranscriptProcessor {
 
     private fun parseGeminiText(body: String): String? {
         return try {
-            val text = JSONObject(body)
-                .getJSONArray("candidates")
-                .getJSONObject(0)
-                .getJSONObject("content")
-                .getJSONArray("parts")
-                .getJSONObject(0)
-                .optString("text")
-                .trim()
+            val parts = JSONObject(body)
+                .optJSONArray("candidates")
+                ?.optJSONObject(0)
+                ?.optJSONObject("content")
+                ?.optJSONArray("parts")
+
+            val text = buildString {
+                if (parts != null) {
+                    for (index in 0 until parts.length()) {
+                        val partText = parts.optJSONObject(index)?.optString("text").orEmpty()
+                        if (partText.isNotBlank()) {
+                            if (isNotEmpty()) append('\n')
+                            append(partText)
+                        }
+                    }
+                }
+            }.trim()
             text.ifBlank { null }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse Gemini response", e)
@@ -272,11 +179,11 @@ object TranscriptProcessor {
         }
     }
 
-    /**
-     * Get API key from BuildConfig or secrets
-     */
-    private fun getApiKey(): String {
-        // In production, this would be loaded from BuildConfig or secrets
+    /** Saved keys take precedence over the optional build-time .env key. */
+    private fun getApiKey(context: Context): String {
+        val savedKey = AppPreferences.getSavedApiKey(context)
+        if (savedKey.isNotBlank()) return savedKey
+
         return try {
             com.example.BuildConfig::class.java.getField("GEMINI_API_KEY")
                 .get(null) as? String ?: ""
@@ -286,111 +193,119 @@ object TranscriptProcessor {
         }
     }
 
-    /**
-     * Build the prompt for Gemini transcription
-     */
-    private fun buildPrompt(language: String): String {
-        return """
-            Please transcribe the audio in this video. 
-            Language: ${getLanguageName(language)}
-            
-            Instructions:
-            1. Listen carefully to all speech in the audio
-            2. Return the complete transcription
-            3. If there are multiple speakers, try to distinguish them
-            4. Include all spoken words, even partial sentences
-            5. Do not add commentary or explanations
-            6. Just return the raw transcription text
-        """.trimIndent()
-    }
+    private fun resolveMediaMimeType(context: Context, uri: Uri): String {
+        val resolverMime = context.contentResolver.getType(uri)?.lowercase(Locale.US)
+        if (resolverMime?.startsWith("audio/") == true || resolverMime?.startsWith("video/") == true) {
+            return resolverMime
+        }
 
-    /**
-     * Get language name from code
-     */
-    private fun getLanguageName(code: String): String {
-        return when (code.lowercase()) {
-            "en", "english" -> "English"
-            "km", "khmer" -> "Khmer"
-            "zh", "chinese" -> "Chinese"
-            "es", "spanish" -> "Spanish"
-            "fr", "french" -> "French"
-            "de", "german" -> "German"
-            "ja", "japanese" -> "Japanese"
-            "ko", "korean" -> "Korean"
-            "vi", "vietnamese" -> "Vietnamese"
-            "th", "thai" -> "Thai"
-            "lo", "lao" -> "Lao"
-            "my", "burmese" -> "Burmese"
-            else -> code
+        val extension = uri.lastPathSegment
+            ?.substringAfterLast('.', "")
+            ?.lowercase(Locale.US)
+        return when (extension) {
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "ogg", "oga" -> "audio/ogg"
+            "opus" -> "audio/opus"
+            "mp4", "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "3gp" -> "video/3gpp"
+            "mov" -> "video/quicktime"
+            else -> "application/octet-stream"
         }
     }
 
-    /**
-     * Parse transcript text and create chunks with timestamps
-     */
+    private fun getMediaDuration(context: Context, uri: Uri): Long {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            retriever.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read media duration", e)
+            0L
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun buildPrompt(language: String): String {
+        val languageInstruction = when (normalizeLanguage(language)) {
+            "km" -> "Transcribe the speech in Khmer."
+            "en" -> "Transcribe the speech in English."
+            else -> "Automatically detect the speech language. It will be English or Khmer."
+        }
+
+        return """
+            Transcribe all spoken words in the attached media.
+            $languageInstruction
+            Do not translate the speech. Keep the original wording and script.
+            Include speech from every speaker and do not omit partial sentences.
+            Ignore music and non-speech sounds unless they are necessary for context.
+            Return only the transcript text, with no headings, commentary, markdown, or explanation.
+        """.trimIndent()
+    }
+
+    private fun normalizeLanguage(language: String): String {
+        return when (language.lowercase(Locale.US)) {
+            "en", "english" -> "en"
+            "km", "khmer" -> "km"
+            else -> "auto"
+        }
+    }
+
+    /** Creates useful approximate timestamps because the REST response is plain text. */
     private fun parseTranscriptWithTimestamps(
         transcriptText: String,
         totalDurationMs: Long,
         chunkDurationMs: Long
     ): List<TranscriptChunk> {
-        val chunks = mutableListOf<TranscriptChunk>()
-        
-        // Clean up the transcript text
         val cleanText = transcriptText
-            .replace(Regex("\\[.*?\\]|\\(.*?\\)"), "") // Remove brackets and parentheticals
-            .replace(Regex("\\n{3,}"), "\n\n") // Normalize line breaks
+            .replace(Regex("(?s)```(?:text)?\\s*|```"), "")
             .trim()
-        
-        if (cleanText.isBlank()) {
-            return chunks
-        }
-        
-        // Split by sentences or line breaks
+        if (cleanText.isBlank()) return emptyList()
+
         val segments = cleanText
-            .split(Regex("(?<=[.!?])\\s+|(?=\n)|(?<=\n)"))
-            .filter { it.isNotBlank() && it.length > 2 }
+            .split(Regex("(?<=[.!?])\\s+|\\n+"))
             .map { it.trim() }
-        
-        // Calculate approximate timestamps for each segment
-        var currentTimeMs = 0L
-        val avgSegmentDuration = if (segments.isNotEmpty()) {
-            (totalDurationMs / segments.size.toLong()).coerceAtLeast(1000L)
-        } else {
-            chunkDurationMs
-        }
-        
-        segments.forEachIndexed { index, text ->
-            // Estimate segment duration based on text length
-            val estimatedDuration = (avgSegmentDuration.toDouble() * (text.length / 50.0))
-                .toLong()
-                .coerceIn(1000L, chunkDurationMs * 2)
-            
-            val endTime = (currentTimeMs + estimatedDuration).coerceAtMost(totalDurationMs)
-            
-            chunks.add(
-                TranscriptChunk(
-                    index = index + 1,
-                    startMs = currentTimeMs,
-                    endMs = endTime,
-                    text = text
-                )
+            .filter { it.length > 1 }
+        if (segments.isEmpty()) return emptyList()
+
+        val safeChunkDuration = chunkDurationMs.coerceAtLeast(1000L)
+        val duration = totalDurationMs.takeIf { it > 0L }
+            ?: (safeChunkDuration * segments.size)
+        val totalCharacters = segments.sumOf { it.length }.coerceAtLeast(1)
+        var currentTime = 0L
+
+        return segments.mapIndexed { index, text ->
+            val remainingChunks = segments.size - index
+            val remainingTime = (duration - currentTime).coerceAtLeast(remainingChunks * 500L)
+            val estimated = if (index == segments.lastIndex) {
+                remainingTime
+            } else {
+                (duration.toDouble() * text.length / totalCharacters)
+                    .toLong()
+                    .coerceAtLeast(500L)
+                    .coerceAtMost((remainingTime - (remainingChunks - 1) * 500L).coerceAtLeast(500L))
+            }
+            val endTime = (currentTime + estimated).coerceAtMost(duration)
+            val chunk = TranscriptChunk(
+                index = index + 1,
+                startMs = currentTime,
+                endMs = endTime.coerceAtLeast(currentTime + 1L),
+                text = text
             )
-            
-            currentTimeMs = endTime
+            currentTime = endTime
+            chunk
         }
-        
-        // Ensure last chunk ends at video duration
-        if (chunks.isNotEmpty() && chunks.last().endMs < totalDurationMs) {
-            val lastChunk = chunks.last()
-            chunks[chunks.lastIndex] = lastChunk.copy(endMs = totalDurationMs)
-        }
-        
-        return chunks
     }
 
-    /**
-     * Export transcript to SRT format
-     */
     fun exportToSrt(transcript: Transcript, outputPath: String): Boolean {
         return try {
             File(outputPath).writeText(transcript.toSrtFormat())
@@ -401,19 +316,14 @@ object TranscriptProcessor {
         }
     }
 
-    /**
-     * Export transcript to plain text with timestamps
-     */
     fun exportToTextWithTimestamps(transcript: Transcript, outputPath: String): Boolean {
         return try {
             val builder = StringBuilder()
             builder.append("TRANSCRIPT\n")
             builder.append("==========\n\n")
-            
             transcript.chunks.forEach { chunk ->
                 builder.append("[${formatTime(chunk.startMs)}] ${chunk.text}\n\n")
             }
-            
             File(outputPath).writeText(builder.toString())
             true
         } catch (e: Exception) {
@@ -422,20 +332,15 @@ object TranscriptProcessor {
         }
     }
 
-    /**
-     * Export transcript to VTT format (WebVTT)
-     */
     fun exportToVtt(transcript: Transcript, outputPath: String): Boolean {
         return try {
             val builder = StringBuilder()
             builder.append("WEBVTT\n\n")
-            
             transcript.chunks.forEach { chunk ->
                 builder.append("${chunk.index}\n")
                 builder.append("${formatVttTime(chunk.startMs)} --> ${formatVttTime(chunk.endMs)}\n")
                 builder.append("${chunk.text}\n\n")
             }
-            
             File(outputPath).writeText(builder.toString())
             true
         } catch (e: Exception) {
@@ -446,18 +351,24 @@ object TranscriptProcessor {
 
     private fun formatTime(ms: Long): String {
         val totalSeconds = ms / 1000
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        return String.format(
+            Locale.US,
+            "%02d:%02d:%02d",
+            totalSeconds / 3600,
+            (totalSeconds % 3600) / 60,
+            totalSeconds % 60
+        )
     }
 
     private fun formatVttTime(ms: Long): String {
         val totalSeconds = ms / 1000
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        val millis = ms % 1000
-        return String.format("%02d:%02d:%02d.%03d", hours, minutes, seconds, millis)
+        return String.format(
+            Locale.US,
+            "%02d:%02d:%02d.%03d",
+            totalSeconds / 3600,
+            (totalSeconds % 3600) / 60,
+            totalSeconds % 60,
+            ms % 1000
+        )
     }
 }
