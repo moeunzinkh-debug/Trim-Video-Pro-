@@ -3,10 +3,18 @@ package com.example.trimvideopro.localization
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import java.util.Locale
 
 enum class AppLanguage(val code: String, val displayName: String, val flag: String) {
     ENGLISH("en", "English", "🇬🇧"),
-    KHMER("km", "ភាសាខ្មែរ", "🇰🇭")
+    KHMER("km", "ភាសាខ្មែរ", "🇰🇭");
+
+    companion object {
+        /** Khmer devices start in Khmer; every other locale starts in English. */
+        fun fromLocale(locale: Locale = Locale.getDefault()): AppLanguage {
+            return if (locale.language.equals("km", ignoreCase = true)) KHMER else ENGLISH
+        }
+    }
 }
 
 data class AppStrings(
@@ -63,6 +71,7 @@ data class AppStrings(
     val shareTranscript: String,
     val errorSharing: String,
     val transcriptLanguage: String,
+    val autoDetectLanguage: String,
     val noTranscriptAvailable: String,
     val chunkIndex: String,
     val timestamp: String,
@@ -107,6 +116,13 @@ data class AppStrings(
     val clearCache: String,
     val cacheCleared: String,
     val language: String,
+    val geminiApiKey: String,
+    val geminiApiKeyHint: String,
+    val geminiApiKeyDescription: String,
+    val saveApiKey: String,
+    val clearApiKey: String,
+    val apiKeySaved: String,
+    val apiKeyCleared: String,
     val shareWithFriends: String,
     val shareAppText: String,
     val feedback: String,
@@ -120,9 +136,9 @@ data class AppStrings(
 
 val EnglishStrings = AppStrings(
     appTitle = "Trim Video Pro",
-    offlineBadge = "100% Offline • No Watermark",
-    selectVideo = "Select Video to Edit",
-    changeVideo = "Choose Different Video",
+    offlineBadge = "Offline editing • Gemini AI transcript",
+    selectVideo = "Select video or audio",
+    changeVideo = "Choose different media",
     refresh = "Refresh",
     refreshedMsg = "Video settings and state refreshed",
     tabTrim = "Trim Video",
@@ -154,11 +170,11 @@ val EnglishStrings = AppStrings(
     // Transcript
     tabTranscript = "Transcript",
     generateTranscript = "Generate Transcript",
-    transcriptTitle = "Video Transcript",
+    transcriptTitle = "Media Transcript",
     transcriptComplete = "Transcript generated successfully!",
     transcriptError = "Failed to generate transcript. Please check your internet connection and Gemini API key.",
     transcriptProgress = "Generating transcript...",
-    extractingAudio = "Extracting audio from video...",
+    extractingAudio = "Preparing audio or video...",
     sendingToGemini = "Sending to Gemini AI...",
     processingTranscript = "Processing transcript...",
     exportToSrt = "Export as SRT (Subtitles)",
@@ -169,7 +185,8 @@ val EnglishStrings = AppStrings(
     txtExportedSuccess = "Text file exported successfully!",
     shareTranscript = "Share Transcript",
     errorSharing = "Error sharing transcript",
-    transcriptLanguage = "Transcript Language",
+    transcriptLanguage = "Source language",
+    autoDetectLanguage = "Auto-detect (English or Khmer)",
     noTranscriptAvailable = "No transcript available. Generate one first!",
     chunkIndex = "Chunk",
     timestamp = "Timestamp",
@@ -213,6 +230,13 @@ val EnglishStrings = AppStrings(
     clearCache = "Clear Cache",
     cacheCleared = "Cache cleared successfully!",
     language = "Language / ភាសា",
+    geminiApiKey = "Gemini API key",
+    geminiApiKeyHint = "Paste your Gemini API key",
+    geminiApiKeyDescription = "Saved only on this device. Required to generate transcripts.",
+    saveApiKey = "Save API key",
+    clearApiKey = "Clear API key",
+    apiKeySaved = "Gemini API key saved",
+    apiKeyCleared = "Gemini API key removed",
     shareWithFriends = "Share with your friend 🥰",
     shareAppText = "Check out Trim Video Pro - Free offline video trimming & splitting app! Created by Moeun💞",
     feedback = "Feedback",
@@ -226,9 +250,9 @@ val EnglishStrings = AppStrings(
 
 val KhmerStrings = AppStrings(
     appTitle = "កាត់វីដេអូ ប្រូ (Trim Video Pro)",
-    offlineBadge = "អូហ្វឡាញ ១០០% • គ្មានរូបសញ្ញាទឹក (Watermark)",
-    selectVideo = "ជ្រើសរើសវីដេអូដើម",
-    changeVideo = "ប្តូរវីដេអូផ្សេង",
+    offlineBadge = "កាត់តអូហ្វឡាញ • ប្រើ Gemini AI សម្រាប់អត្ថបទ",
+    selectVideo = "ជ្រើសរើសវីដេអូ ឬ សំឡេង",
+    changeVideo = "ប្តូរមេឌៀផ្សេង",
     refresh = "ផ្ទុកឡើងវិញ (Refresh)",
     refreshedMsg = "បានផ្ទុកឡើងវិញ",
     tabTrim = "កាត់យកផ្នែក",
@@ -260,11 +284,11 @@ val KhmerStrings = AppStrings(
     // Transcript
     tabTranscript = "អត្ថបទ",
     generateTranscript = "បង្កើតអត្ថបទ",
-    transcriptTitle = "អត្ថបទវីដេអូ",
+    transcriptTitle = "អត្ថបទមេឌៀ",
     transcriptComplete = "បានបង្កើត!",
     transcriptError = "បរាជ័យ",
     transcriptProgress = "កំពុងបង្កើត...",
-    extractingAudio = "កំពុងទាញ...",
+    extractingAudio = "កំពុងរៀបចំសំឡេង ឬ វីដេអូ...",
     sendingToGemini = "កំពុង Gemini...",
     processingTranscript = "កំពុង...",
     exportToSrt = "SRT",
@@ -275,8 +299,9 @@ val KhmerStrings = AppStrings(
     txtExportedSuccess = "អត្ថបទបាន!",
     shareTranscript = "ចែក",
     errorSharing = "បរាជ័យ",
-    transcriptLanguage = "ភាសា",
-    noTranscriptAvailable = "គ្មាន",
+    transcriptLanguage = "ភាសាដើម",
+    autoDetectLanguage = "ស្គាល់ដោយស្វ័យប្រវត្តិ (អង់គ្លេស ឬ ខ្មែរ)",
+    noTranscriptAvailable = "គ្មានអត្ថបទទេ។ សូមបង្កើតជាមុនសិន!",
     chunkIndex = "ផ្នែក",
     timestamp = "ពេល",
     selectChunk = "ជ្រើស",
@@ -316,6 +341,13 @@ val KhmerStrings = AppStrings(
     clearCache = "Cache",
     cacheCleared = "Cache បាន!",
     language = "ភាសា",
+    geminiApiKey = "Gemini API key",
+    geminiApiKeyHint = "បិទភ្ជាប់ Gemini API key របស់អ្នក",
+    geminiApiKeyDescription = "រក្សាទុកតែនៅលើឧបករណ៍នេះ។ ត្រូវការសម្រាប់បង្កើតអត្ថបទ។",
+    saveApiKey = "រក្សាទុក API key",
+    clearApiKey = "លុប API key",
+    apiKeySaved = "បានរក្សាទុក Gemini API key",
+    apiKeyCleared = "បានលុប Gemini API key",
     shareWithFriends = "ចែក 🥰",
     shareAppText = "Trim Video Pro - Moeun💞",
     feedback = "មតិ",

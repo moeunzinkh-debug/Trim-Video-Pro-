@@ -80,7 +80,9 @@ import com.example.trimvideopro.localization.KhmerStrings
 import com.example.trimvideopro.localization.LocalAppStrings
 import com.example.trimvideopro.model.ProcessedVideo
 import com.example.trimvideopro.processor.VideoProcessor
+import com.example.trimvideopro.settings.AppPreferences
 import com.example.trimvideopro.ui.components.ApkBuildGuideDialog
+import com.example.trimvideopro.ui.components.AudioPlayerView
 import com.example.trimvideopro.ui.components.ExportHistoryView
 import com.example.trimvideopro.ui.components.SplitConfigView
 import com.example.trimvideopro.ui.components.TimelineTrimSlider
@@ -105,8 +107,8 @@ fun TrimVideoApp(
 
     var selectedTab by remember { mutableStateOf(AppTab.TRIM) }
 
-    val videoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+    val mediaPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.selectVideo(context, uri)
@@ -247,7 +249,7 @@ fun TrimVideoApp(
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                 )
                                 Button(
-                                    onClick = { videoPickerLauncher.launch("video/*") },
+                                    onClick = { mediaPickerLauncher.launch(arrayOf("video/*", "audio/*")) },
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Icon(
@@ -273,7 +275,11 @@ fun TrimVideoApp(
                                     )
                                     state.metadata?.let { meta ->
                                         Text(
-                                            text = "${VideoProcessor.formatDuration(meta.durationMs)} • ${meta.width}x${meta.height} • ${VideoProcessor.formatFileSize(meta.fileSize)}",
+                                            text = if (meta.mimeType.startsWith("audio/")) {
+                                                "Audio • ${VideoProcessor.formatDuration(meta.durationMs)} • ${VideoProcessor.formatFileSize(meta.fileSize)}"
+                                            } else {
+                                                "${VideoProcessor.formatDuration(meta.durationMs)} • ${meta.width}x${meta.height} • ${VideoProcessor.formatFileSize(meta.fileSize)}"
+                                            },
                                             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -289,7 +295,7 @@ fun TrimVideoApp(
                                         )
                                     }
                                     OutlinedButton(
-                                        onClick = { videoPickerLauncher.launch("video/*") },
+                                        onClick = { mediaPickerLauncher.launch(arrayOf("video/*", "audio/*")) },
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
                                         Text(strings.changeVideo, fontSize = 12.sp)
@@ -307,10 +313,17 @@ fun TrimVideoApp(
                                     CircularProgressIndicator()
                                 }
                             } else {
-                                VideoPlayerView(
-                                    videoUri = state.selectedVideoUri!!,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                if (state.metadata?.mimeType?.startsWith("audio/") == true) {
+                                    AudioPlayerView(
+                                        audioUri = state.selectedVideoUri!!,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    VideoPlayerView(
+                                        videoUri = state.selectedVideoUri!!,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }
@@ -486,7 +499,9 @@ fun TrimVideoApp(
         if (state.showSettingsDialog) {
             SettingsBottomSheet(
                 currentLanguage = state.language,
+                currentApiKey = AppPreferences.getSavedApiKey(context),
                 onLanguageSelected = { viewModel.setLanguage(it) },
+                onSaveApiKey = { viewModel.saveGeminiApiKey(context, it) },
                 onClearCache = { viewModel.clearCache(context) },
                 onShareWithFriends = { viewModel.shareApp(context) },
                 onOpenFeedback = { viewModel.toggleFeedbackDialog(true) },

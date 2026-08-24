@@ -52,18 +52,13 @@ fun TranscriptView(
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
-    var selectedLanguage by remember { mutableStateOf("en") }
+    // Auto-detect is the safe default. The only explicit target languages are
+    // English and Khmer.
+    var selectedLanguage by remember { mutableStateOf("auto") }
     val languages = listOf(
+        "auto" to "✨ ${strings.autoDetectLanguage}",
         "en" to "🇬🇧 English",
-        "km" to "🇰🇭 Khmer",
-        "zh" to "🇨🇳 Chinese",
-        "es" to "🇪🇸 Spanish",
-        "fr" to "🇫🇷 French",
-        "de" to "🇩🇪 German",
-        "ja" to "🇯🇵 Japanese",
-        "ko" to "🇰🇷 Korean",
-        "vi" to "🇻🇳 Vietnamese",
-        "th" to "🇹🇭 Thai"
+        "km" to "🇰🇭 Khmer"
     )
 
     Column(
@@ -101,7 +96,8 @@ fun TranscriptView(
 
                 // Language Dropdown
                 var expanded by remember { mutableStateOf(false) }
-                val selectedLangName = languages.find { it.first == selectedLanguage }?.second ?: "🇬🇧 English"
+                val selectedLangName = languages.find { it.first == selectedLanguage }?.second
+                            ?: "✨ ${strings.autoDetectLanguage}"
 
                 ExposedDropdownMenuBox(
                     expanded = expanded,
