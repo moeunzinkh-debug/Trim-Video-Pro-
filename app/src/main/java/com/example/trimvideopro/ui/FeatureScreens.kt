@@ -193,6 +193,7 @@ fun SplitScreen(
 
 @Composable
 fun TranscriptScreen(
+    exportNotice: String? = null,
     provider: com.example.trimvideopro.model.TranscriptProvider = com.example.trimvideopro.model.TranscriptProvider.GEMINI,
     onProviderChange: (com.example.trimvideopro.model.TranscriptProvider) -> Unit = {},
     selectedVideoUri: Uri?,
@@ -233,6 +234,7 @@ fun TranscriptScreen(
         )
 
         TranscriptProviderSelector(provider, transcriptStatus, onProviderChange)
+        exportNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
         if (selectedVideoUri != null) {
             TranscriptView(

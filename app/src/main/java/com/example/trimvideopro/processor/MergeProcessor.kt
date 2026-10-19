@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import com.example.trimvideopro.model.ProcessedVideo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -16,11 +17,19 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.util.UUID
 
-/** Lossless concatenation. Incompatible tracks are rejected before writing any output. */
+/** Prefer lossless concatenation; automatically transcode incompatible streams on-device. */
 object MergeProcessor {
     private data class Source(val formats: List<MediaFormat>, val indices: List<Int>, val rotation: Int, val durationUs: Long)
 
-    suspend fun merge(context: Context, uris: List<Uri>, onProgress: (Float) -> Unit): ProcessedVideo =
+    suspend fun merge(context: Context, uris: List<Uri>, onProgress: (Float) -> Unit): ProcessedVideo {
+        require(uris.size in 2..20) { "Choose 2–20 videos." }
+        return try { mergeLossless(context, uris, onProgress) } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            onProgress(0f)
+            VideoCompositionProcessor.merge(context, uris, onProgress)
+        }
+    }
+
+    private suspend fun mergeLossless(context: Context, uris: List<Uri>, onProgress: (Float) -> Unit): ProcessedVideo =
         withContext(Dispatchers.IO) {
             require(uris.size in 2..20) { "Choose 2–20 videos." }
             val sources = uris.map { uri ->

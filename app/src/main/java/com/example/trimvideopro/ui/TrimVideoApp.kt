@@ -212,6 +212,7 @@ fun TrimVideoApp(
                         AudioToolScreen(targetScreen, state, viewModel)
 
                     AppScreen.TRANSCRIPT -> TranscriptScreen(
+                        exportNotice = state.transcriptExportNotice,
                         provider = state.transcriptProvider,
                         onProviderChange = viewModel::setTranscriptProvider,
                         selectedVideoUri = state.selectedVideoUri,
@@ -232,9 +233,9 @@ fun TrimVideoApp(
                             // Jump the trim range to the selected chunk's timestamps
                             viewModel.updateTrimRange(chunk.startMs, chunk.endMs)
                         },
-                        onExportSrt = { viewModel.exportTranscriptToSrt(context) },
-                        onExportVtt = { viewModel.exportTranscriptToVtt(context) },
-                        onExportText = { viewModel.exportTranscriptToText(context) },
+                        onExportSrt = { withStoragePermission { viewModel.exportTranscriptToSrt(context) } },
+                        onExportVtt = { withStoragePermission { viewModel.exportTranscriptToVtt(context) } },
+                        onExportText = { withStoragePermission { viewModel.exportTranscriptToText(context) } },
                         onShareTranscript = { viewModel.shareTranscript(context) }
                     )
 

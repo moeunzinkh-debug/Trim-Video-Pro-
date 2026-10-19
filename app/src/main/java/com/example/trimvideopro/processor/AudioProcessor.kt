@@ -2,9 +2,6 @@ package com.example.trimvideopro.processor
 
 import android.content.Context
 import android.media.AudioFormat
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.net.Uri
 import com.example.trimvideopro.model.AudioEffects
 import com.example.trimvideopro.model.ProcessedVideo
@@ -34,22 +31,12 @@ object AudioProcessor {
         val directory = File(context.getExternalFilesDir(null) ?: context.filesDir, "TrimmedVideos").apply { mkdirs() }
         val completedFile = File(directory, "${prefix}_${UUID.randomUUID()}.wav")
         val file = File(directory, "${completedFile.name}.partial")
-        val extractor = MediaExtractor()
-        var decoder: MediaCodec? = null
         var output: BufferedOutputStream? = null
         try {
-            extractor.setDataSource(context, source, null)
-            val track = (0 until extractor.trackCount).firstOrNull {
-                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: error("This media has no audio track.")
-            val format = extractor.getTrackFormat(track)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: error("Unknown audio format.")
-            extractor.selectTrack(track)
-            extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var rate = 0
+            var channels = 0
             var encoding = AudioFormat.ENCODING_PCM_16BIT
-            var dsp = AudioDsp(rate, channels, effects)
+            var dsp: AudioDsp? = null
             var written = 0L
             var bytes = 0L
             val sink = BufferedOutputStream(file.outputStream(), 64 * 1024)
@@ -70,7 +57,7 @@ object AudioProcessor {
                     val keep = timestamp >= startMs * 1000 && timestamp < endMs * 1000
                     for (channel in 0 until channels) {
                         val value = if (sampleBytes == 4) data.float else data.short / 32768f
-                        if (keep) rendered.putShort((dsp.process(value, written, totalFrames) * 32767).toInt().toShort())
+                        if (keep) rendered.putShort((dsp!!.process(value, written, totalFrames) * 32767).toInt().toShort())
                     }
                     if (keep) written++
                 }
@@ -79,79 +66,13 @@ object AudioProcessor {
                 sink.write(rendered.array(), 0, rendered.position())
                 onProgress(((timeUs / 1000f - startMs) / (endMs - startMs)).coerceIn(0f, 0.99f))
             }
-            if (mime == "audio/raw") {
-                if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) encoding = format.getInteger(MediaFormat.KEY_PCM_ENCODING)
-                val buffer = ByteBuffer.allocateDirect(1024 * 1024)
-                while (extractor.sampleTime >= 0 && extractor.sampleTime < endMs * 1000) {
-                    currentCoroutineContext().ensureActive()
-                    buffer.clear()
-                    val size = extractor.readSampleData(buffer, 0)
-                    if (size < 0) break
-                    buffer.limit(size)
-                    consume(buffer, extractor.sampleTime)
-                    extractor.advance()
-                }
-            } else {
-                val codec = MediaCodec.createDecoderByType(mime)
-                decoder = codec
-                codec.configure(format, null, null, 0)
-                codec.start()
-                val info = MediaCodec.BufferInfo()
-                var inputEnded = false
-                var outputEnded = false
-                var idleCount = 0
-                while (!outputEnded) {
-                    currentCoroutineContext().ensureActive()
-                    var advanced = false
-                    if (!inputEnded) {
-                        val index = codec.dequeueInputBuffer(10_000)
-                        if (index >= 0) {
-                            val buffer = codec.getInputBuffer(index) ?: error("Decoder input unavailable.")
-                            val time = extractor.sampleTime
-                            if (time < 0 || time >= endMs * 1000) {
-                                codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                                inputEnded = true
-                            } else {
-                                val size = extractor.readSampleData(buffer, 0)
-                                if (size < 0) {
-                                    codec.queueInputBuffer(index, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                                    inputEnded = true
-                                } else {
-                                    codec.queueInputBuffer(index, 0, size, time, 0)
-                                    extractor.advance()
-                                }
-                            }
-                            advanced = true
-                        }
-                    }
-                    val index = codec.dequeueOutputBuffer(info, 10_000)
-                    if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        val decoded = codec.outputFormat
-                        val newRate = decoded.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                        val newChannels = decoded.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        require(bytes == 0L || (newRate == rate && newChannels == channels)) { "Audio format changed mid-stream." }
-                        rate = newRate
-                        channels = newChannels
-                        encoding = if (decoded.containsKey(MediaFormat.KEY_PCM_ENCODING))
-                            decoded.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
-                        dsp = AudioDsp(rate, channels, effects)
-                        advanced = true
-                    } else if (index >= 0) {
-                        try {
-                            if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                                val data = codec.getOutputBuffer(index) ?: error("Decoder output unavailable.")
-                                data.position(info.offset)
-                                data.limit(info.offset + info.size)
-                                consume(data.slice(), info.presentationTimeUs)
-                            }
-                            outputEnded = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                        } finally { codec.releaseOutputBuffer(index, false) }
-                        advanced = true
-                    }
-                    idleCount = if (advanced) 0 else idleCount + 1
-                    check(idleCount < 1500) { "Audio decoder timed out." }
-                }
-            }
+            PcmDecoder.decode(context, source, startMs, endMs,
+                onFormat = { newRate, newChannels, newEncoding ->
+                    require(bytes == 0L || (newRate == rate && newChannels == channels)) { "Audio format changed mid-stream." }
+                    rate = newRate; channels = newChannels; encoding = newEncoding
+                    dsp = AudioDsp(rate, channels, effects)
+                },
+                onBuffer = ::consume)
             sink.close()
             output = null
             check(bytes > 0) { "No audio samples in this range." }
@@ -166,10 +87,6 @@ object AudioProcessor {
             file.delete()
             completedFile.delete()
             throw e
-        } finally {
-            runCatching { decoder?.stop() }
-            runCatching { decoder?.release() }
-            extractor.release()
         }
     }
 

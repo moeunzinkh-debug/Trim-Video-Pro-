@@ -11,6 +11,9 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.trimvideopro.localization.tool
+import com.example.trimvideopro.processor.TranscriptExportProcessor
+import com.example.trimvideopro.processor.TranscriptExportFormat
 import com.example.trimvideopro.localization.AppLanguage
 import com.example.trimvideopro.localization.EnglishStrings
 import com.example.trimvideopro.localization.KhmerStrings
@@ -77,6 +80,7 @@ data class VideoUiState(
     val statusMessage: String? = null,
     
     // Transcript state
+    val transcriptExportNotice: String? = null,
     val transcriptStatus: TranscriptStatus = TranscriptStatus.Idle,
     val transcript: Transcript? = null,
     val transcriptProgress: Float = 0f,
@@ -159,6 +163,7 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
                     previewThumbnail = null,
                     transcriptStatus = TranscriptStatus.Idle,
                     transcript = null,
+                    transcriptExportNotice = null,
                     selectedTranscriptChunk = null,
                     statusMessage = null
                 )
@@ -708,7 +713,12 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
             var failure: String? = null
             val result = try {
                 if (provider == TranscriptProvider.GROQ_WHISPER) {
-                    GroqProcessor.transcribe(context, uri, requestedLanguage, _uiState.value.metadata?.durationMs ?: 0) { progress, message ->
+                    GroqProcessor.transcribe(context, uri, requestedLanguage, _uiState.value.metadata?.durationMs ?: 0,
+                        onPartialTranscript = { partial ->
+                            generationContext.ensureActive()
+                            _uiState.update { it.copy(transcript = partial) }
+                        }
+                    ) { progress, message ->
                         generationContext.ensureActive()
                         _uiState.update { it.copy(transcriptProgress = progress, transcriptProgressMessage = message) }
                     }
@@ -760,78 +770,24 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedTranscriptChunk = chunk) }
     }
 
-    fun exportTranscriptToSrt(context: Context) {
+    fun exportTranscriptToSrt(context: Context) = exportTranscript(context, TranscriptExportFormat.SRT)
+    fun exportTranscriptToVtt(context: Context) = exportTranscript(context, TranscriptExportFormat.VTT)
+    fun exportTranscriptToText(context: Context) = exportTranscript(context, TranscriptExportFormat.TEXT)
+
+    private fun exportTranscript(context: Context, format: TranscriptExportFormat) {
         val transcript = _uiState.value.transcript ?: return
         val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
         viewModelScope.launch {
             try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.srt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToSrt(transcript, outputFile.absolutePath)
-                if (success) {
-                    // Also save to Downloads folder
-                    saveToDownloads(context, outputFile, "srt")
-                    Toast.makeText(context, strings.srtExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    fun exportTranscriptToVtt(context: Context) {
-        val transcript = _uiState.value.transcript ?: return
-        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
-        viewModelScope.launch {
-            try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.vtt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToVtt(transcript, outputFile.absolutePath)
-                if (success) {
-                    saveToDownloads(context, outputFile, "vtt")
-                    Toast.makeText(context, strings.vttExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    fun exportTranscriptToText(context: Context) {
-        val transcript = _uiState.value.transcript ?: return
-        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
-        viewModelScope.launch {
-            try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.txt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToTextWithTimestamps(transcript, outputFile.absolutePath)
-                if (success) {
-                    saveToDownloads(context, outputFile, "txt")
-                    Toast.makeText(context, strings.txtExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+                val path = TranscriptExportProcessor.save(context, transcript, format)
+                val message = strings.tool("Saved to $path", "បានរក្សាទុកនៅ $path")
+                _uiState.update { it.copy(transcriptExportNotice = message) }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                val message = strings.tool("Download failed. Check storage space/permission. ${e.message}",
+                    "ការរក្សាទុកទៅ Downloads បរាជ័យ។ សូមពិនិត្យទំហំផ្ទុក និងសិទ្ធិ។ ${e.message}")
+                _uiState.update { it.copy(transcriptExportNotice = message) }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -858,40 +814,6 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
             context.startActivity(Intent.createChooser(intent, strings.shareTranscript))
         } catch (e: Exception) {
             Toast.makeText(context, strings.errorSharing, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun saveToDownloads(context: Context, sourceFile: File, extension: String) {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, sourceFile.name)
-                    put(MediaStore.Downloads.MIME_TYPE, when (extension) {
-                        "srt" -> "application/x-subrip"
-                        "vtt" -> "text/vtt"
-                        else -> "text/plain"
-                    })
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/TrimVideoPro/Transcripts")
-                }
-
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                uri?.let {
-                    resolver.openOutputStream(it)?.use { outputStream ->
-                        sourceFile.inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-                }
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val trimDir = File(downloadsDir, "TrimVideoPro/Transcripts")
-                if (!trimDir.exists()) trimDir.mkdirs()
-                val destFile = File(trimDir, sourceFile.name)
-                sourceFile.copyTo(destFile, overwrite = true)
-            }
-        } catch (e: Exception) {
-            // Silently fail, file is already saved to app directory
         }
     }
 

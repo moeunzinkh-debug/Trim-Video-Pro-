@@ -246,6 +246,9 @@ fun TranscriptView(
                 Text("${strings.transcriptLanguage}: ${TranscriptLanguages.displayName(transcript.language)}",
                     style = MaterialTheme.typography.labelLarge)
             }
+            Text(strings.tool("SRT, TXT and VTT exports are saved to Downloads/TrimVideoPro/Transcripts. Open your phone's Files app → Downloads to find them.",
+                "ឯកសារ SRT, TXT និង VTT រក្សាទុកនៅ Downloads/TrimVideoPro/Transcripts។ បើកកម្មវិធី Files របស់ទូរសព្ទ → Downloads ដើម្បីរកឯកសារ។"),
+                style = MaterialTheme.typography.bodySmall)
             // Export Options
             Card(
                 modifier = Modifier.fillMaxWidth(),

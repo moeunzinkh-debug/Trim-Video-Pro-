@@ -45,7 +45,15 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Build debug and unsigned release APKs
+      - name: Restore stable test signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: trimvideopro-test-signing-v1
+
+      - name: Build debug and test-signed release APKs
+        env:
+          ALLOW_TEST_SIGNING: 'true'
         shell: bash
         run: |
           if ! gradle :app:assembleDebug :app:assembleRelease --stacktrace > apk-build.log 2>&1; then
@@ -54,6 +62,22 @@ jobs:
             exit 1
           fi
           cat apk-build.log
+
+      - name: Verify APK signatures
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Test media and transcript logic
+        env:
+          ALLOW_TEST_SIGNING: 'true'
+        run: |
+          if ! gradle :app:testDebugUnitTest --tests 'com.example.trimvideopro.*' --stacktrace > unit-tests.log 2>&1; then
+            cat unit-tests.log
+            python3 -c 'from pathlib import Path; text=Path("unit-tests.log").read_text()[-40000:]; print("::error title=Unit tests failed::" + text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))'
+            exit 1
+          fi
+          cat unit-tests.log
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -66,7 +90,7 @@ jobs:
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: TrimVideoPro-release-unsigned
+          name: TrimVideoPro-release-test-signed
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -75,5 +99,5 @@ jobs:
         run: |
           echo '## APK builds' >> "$GITHUB_STEP_SUMMARY"
           echo '- **Debug:** signed with the Android debug key; installable.' >> "$GITHUB_STEP_SUMMARY"
-          echo '- **Release:** unsigned; sign with your own release key before installation or publishing.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- **Release (test):** debug-key signed, package com.aistudio.trimvideopro.moenuo.test; installable beside the original app. Not for Play Store.' >> "$GITHUB_STEP_SUMMARY"
           echo '- Download both APK ZIPs from the artifacts section of this run.' >> "$GITHUB_STEP_SUMMARY"

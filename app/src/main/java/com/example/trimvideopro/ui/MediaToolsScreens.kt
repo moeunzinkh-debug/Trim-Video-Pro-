@@ -36,8 +36,8 @@ fun MergeScreen(state: VideoUiState, viewModel: VideoViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(s.toolTitle(AppScreen.MERGE), style = MaterialTheme.typography.headlineSmall)
-        Text(s.tool("Join 2–20 clips in the order below, without quality loss. Clips must have matching codecs, resolution, orientation and audio tracks.",
-            "បញ្ចូលវីដេអូ 2–20 តាមលំដាប់ខាងក្រោម ដោយមិនបាត់បង់គុណភាព។ កូឌិក ទំហំ ទិស និងបទសំឡេងត្រូវតែដូចគ្នា។"))
+        Text(s.tool("Join 2–20 clips in order. Matching clips use lossless merging. Other clips are automatically converted to a common size (up to 720p), H.264 video and AAC audio. Missing audio becomes silence; different aspect ratios are letterboxed. Conversion may take longer.",
+            "បញ្ចូលវីដេអូ 2–20 តាមលំដាប់។ ឯកសារដែលត្រូវគ្នាបញ្ចូលដោយមិនបាត់គុណភាព។ ឯកសារខុសគ្នាត្រូវបានបម្លែងស្វ័យប្រវត្តិទៅទំហំរួម (រហូតដល់ 720p), H.264 និង AAC។ កន្លែងគ្មានសំឡេងប្រើភាពស្ងាត់។ សមាមាត្រខុសគ្នាមានគែមខ្មៅ ដោយមិនទាញរូបឲ្យខូច។ ការបម្លែងអាចចំណាយពេលយូរ។"))
         OutlinedButton(onClick = { picker.launch(arrayOf("video/*")) }, enabled = !state.isProcessing && !state.isLoadingMerge,
             modifier = Modifier.fillMaxWidth().testTag("merge_add_videos")) {
             Text(s.tool("Add videos", "បន្ថែមវីដេអូ"))
@@ -175,8 +175,8 @@ fun TranscriptProviderSelector(provider: TranscriptProvider, status: TranscriptS
         }
     }
     Text(if (provider == TranscriptProvider.GROQ_WHISPER)
-        s.tool("Whisper Large v3 · maximum 25 MB per file · auto-detect source language (90+ languages). Media is uploaded to Groq only when you generate a transcript.",
-            "Whisper Large v3 · អតិបរមា 25 MB · ស្គាល់ភាសាដើមស្វ័យប្រវត្តិ (ជាង 90 ភាសា)។ ឯកសារត្រូវបានផ្ញើទៅ Groq ពេលបង្កើតអត្ថបទ។")
+        s.tool("Whisper Large v3 · auto-detect 90+ source languages. Audio is automatically extracted to 16 kHz mono. VAD selects quiet split points for long recordings; parts under 25 MB are sent one by one and timestamps are joined in source time. Only audio is uploaded, not video.",
+            "Whisper Large v3 · ស្គាល់ភាសាដើមជាង 90 ដោយស្វ័យប្រវត្តិ។ ទាញយកតែសំឡេងទៅ 16 kHz mono ហើយប្រើ VAD រកចំណុចស្ងាត់សម្រាប់បំបែកឯកសារវែង។ ផ្ញើផ្នែកតូចជាង 25 MB ម្តងមួយៗ និងបន្តរហូតចប់។ ពេលវេលាអត្ថបទត្រូវនឹងឯកសារដើម។ មិនផ្ញើរូបភាពវីដេអូទេ។")
     else s.tool("Media is uploaded to Gemini only when you generate a transcript.", "ឯកសារត្រូវបានផ្ញើទៅ Gemini ពេលបង្កើតអត្ថបទ។"),
         style = MaterialTheme.typography.bodySmall)
 }

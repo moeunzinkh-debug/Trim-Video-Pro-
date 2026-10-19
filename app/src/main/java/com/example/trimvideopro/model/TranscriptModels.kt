@@ -21,7 +21,7 @@ data class TranscriptChunk(
         val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
         val millis = (ms % 1000)
-        return String.format("%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
+        return String.format(java.util.Locale.ROOT, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
     }
 }
 
