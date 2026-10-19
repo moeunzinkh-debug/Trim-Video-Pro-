@@ -275,7 +275,7 @@ fun SplitConfigView(
                                 }
 
                                 Text(
-                                    text = "${VideoProcessor.formatDuration(segment.startMs)} ➔ ${VideoProcessor.formatDuration(segment.endMs)} (${VideoProcessor.formatDuration(segment.durationMs)})",
+                                    text = "${VideoProcessor.formatDuration(segment.startMs)} → ${VideoProcessor.formatDuration(segment.endMs)} (${VideoProcessor.formatDuration(segment.durationMs)})",
                                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
