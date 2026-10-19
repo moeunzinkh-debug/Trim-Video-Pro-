@@ -16,24 +16,29 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+          java-version: '21'
 
       - name: Install Android SDK platform
-        run: sdkmanager 'platforms;android-36.1' 'build-tools;36.0.0'
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36.1' 'build-tools;36.0.0' > sdk-setup.log 2>&1; then
+            cat sdk-setup.log
+            python3 -c 'from pathlib import Path; text=Path("sdk-setup.log").read_text()[-20000:]; print("::error title=Android SDK setup failed::" + text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))'
+            exit 1
+          fi
+          cat sdk-setup.log
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -41,7 +46,14 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Build debug and unsigned release APKs
-        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
+        shell: bash
+        run: |
+          if ! gradle :app:assembleDebug :app:assembleRelease --stacktrace > apk-build.log 2>&1; then
+            cat apk-build.log
+            python3 -c 'from pathlib import Path; text=Path("apk-build.log").read_text()[-40000:]; print("::error title=APK build failed::" + text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))'
+            exit 1
+          fi
+          cat apk-build.log
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
