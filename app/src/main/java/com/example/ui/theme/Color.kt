@@ -12,3 +12,4 @@ val DarkBackground = Color(0xFF0F0D15)
 val DarkSurface = Color(0xFF181524)
 val DarkSurfaceVariant = Color(0xFF262238)
 
+val AmberAccent = Color(0xFFF59E0B)

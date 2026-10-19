@@ -131,7 +131,20 @@ data class AppStrings(
     val send: String,
     val feedbackThanks: String,
     val aboutUs: String,
-    val aboutUsText: String
+    val aboutUsText: String,
+
+    // Home screen & feature navigation
+    val homeGreeting: String,
+    val homeSubtitle: String,
+    val homeTools: String,
+    val featureTrimDescription: String,
+    val featureSplitDescription: String,
+    val featureTranscriptDescription: String,
+    val featureHistoryDescription: String,
+    val openTool: String,
+    val back: String,
+    val selectMediaHint: String,
+    val homePrivacyNote: String
 )
 
 val EnglishStrings = AppStrings(
@@ -245,7 +258,19 @@ val EnglishStrings = AppStrings(
     send = "Send",
     feedbackThanks = "Thank you for your feedback! 🥰",
     aboutUs = "About Us",
-    aboutUsText = "Trim Video Pro v1.0\nCreated by Moeun💞\n\n• 100% Offline & Private\n• Free with No Watermarks\n• Fast Trim & Split by Time or Clips\n• AI-Powered Video Transcript"
+    aboutUsText = "Trim Video Pro v1.0\nCreated by Moeun💞\n\n• 100% Offline & Private\n• Free with No Watermarks\n• Fast Trim & Split by Time or Clips\n• AI-Powered Video Transcript",
+
+    homeGreeting = "What do you want to do?",
+    homeSubtitle = "Pick a tool below. Each one opens on its own page.",
+    homeTools = "Tools",
+    featureTrimDescription = "Cut the exact part you need with a precise timeline.",
+    featureSplitDescription = "Split by time interval or into equal clips.",
+    featureTranscriptDescription = "Turn speech into text with Gemini AI.",
+    featureHistoryDescription = "Play, share and save your exported clips.",
+    openTool = "Open",
+    back = "Back",
+    selectMediaHint = "Select a video or audio file above to use this tool.",
+    homePrivacyNote = "100% offline editing • Your files stay on this device"
 )
 
 val KhmerStrings = AppStrings(
@@ -356,7 +381,19 @@ val KhmerStrings = AppStrings(
     send = "ផ្ញើ",
     feedbackThanks = "អរគុណ! 🥰",
     aboutUs = "អំពី",
-    aboutUsText = "Trim Video Pro v1.0\nMoeun💞\n\n• Offline\n• Free\n• AI Transcript"
+    aboutUsText = "Trim Video Pro v1.0\nMoeun💞\n\n• Offline\n• Free\n• AI Transcript",
+
+    homeGreeting = "តើអ្នកចង់ធ្វើអ្វី?",
+    homeSubtitle = "ជ្រើសរើសឧបករណ៍ខាងក្រោម ដើម្បីបើកទំព័ររៀងៗខ្លួន។",
+    homeTools = "ឧបករណ៍",
+    featureTrimDescription = "កាត់យកផ្នែកដែលអ្នកចង់បាន តាម Timeline។",
+    featureSplitDescription = "ពុះតាមចន្លោះពេល ឬ ជាចំនួន Clip ស្មើៗ។",
+    featureTranscriptDescription = "បំប្លែងសំឡេងទៅជាអត្ថបទ ដោយ Gemini AI។",
+    featureHistoryDescription = "មើល ចែករំលែក និង រក្សាទុក Clip របស់អ្នក។",
+    openTool = "បើក",
+    back = "ត្រឡប់",
+    selectMediaHint = "សូមជ្រើសរើសវីដេអូ ឬ សំឡេងខាងលើ ដើម្បីប្រើឧបករណ៍នេះ។",
+    homePrivacyNote = "កាត់តអូហ្វឡាញ 100% • ឯកសាររបស់អ្នកនៅលើឧបករណ៍នេះ"
 )
 
 val LocalAppStrings = staticCompositionLocalOf { EnglishStrings }
