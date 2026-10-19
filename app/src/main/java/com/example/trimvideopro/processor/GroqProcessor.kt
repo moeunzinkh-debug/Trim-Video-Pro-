@@ -7,6 +7,7 @@ import com.example.trimvideopro.model.Transcript
 import com.example.trimvideopro.model.TranscriptChunk
 import com.example.trimvideopro.model.TranscriptLanguages
 import com.example.trimvideopro.settings.AppPreferences
+import com.example.trimvideopro.settings.GroqApiKeyInput
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -74,7 +75,9 @@ object GroqProcessor {
                 } catch (_: NoSpeechDetectedException) {
                     // Silent parts must not stop transcription of the remaining recording.
                 } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                    throw IllegalStateException("Groq part ${index + 1}/${chunks.size} failed. Completed text remains available for export. ${e.message}", e)
+                    val completedNotice = if (combined.isNotEmpty()) "Completed text remains available for export."
+                        else "No transcript has been generated yet."
+                    throw IllegalStateException("Groq part ${index + 1}/${chunks.size} failed. $completedNotice ${e.message}", e)
                 } finally { chunk.file.delete() }
             }
             require(combined.isNotEmpty()) { "No speech was detected in this media." }
@@ -160,9 +163,8 @@ object GroqProcessor {
         effects to settings.optString("reason", "Suggested settings are ready for review.").take(500)
     }
 
-    private fun apiKey(context: Context): String = AppPreferences.getGroqApiKey(context).also {
-        require(it.isNotBlank()) { "Add your Groq API key in Settings first." }
-    }
+    private fun apiKey(context: Context): String =
+        GroqApiKeyInput.requireValid(AppPreferences.getGroqApiKey(context))
 
     private class GroqHttpException(val code: Int, val retrySeconds: Long?, message: String) : IOException(message)
 

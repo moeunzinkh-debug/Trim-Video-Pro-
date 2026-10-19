@@ -79,3 +79,9 @@ A complete APK build, Robolectric suite, instrumentation tests, and live Groq/Ge
 5. Set a Groq key, generate English and Khmer transcripts, and inspect SRT/VTT timing. Try an invalid key, a video above 25 MB, a recording above 8 minutes, silent audio, and airplane mode. Verify chunk offsets and preserved partial text on a later failure.
 6. Request AI settings from a typed goal; verify the reason and sliders, then export. Clear the key and verify an actionable error.
 7. Save and share audio/video on Android 9 and Android 10+; deny legacy storage permission and verify no success is reported.
+
+### Groq key copy/paste fix (1.1.1)
+
+Groq keys are normalized on input, save, and read: pasted spaces/CR/LF/tabs, Unicode spacing, and common invisible formatting are removed; surrounding quotes and an optional Bearer prefix are unwrapped. Previously saved wrapped keys are repaired automatically. Only an ASCII `gsk_` token is accepted before decoding audio or constructing HTTP headers. Invalid-key errors never include the supplied credential. Both transcription and AI sound recommendations use this validation. Missing/invalid credentials show an actionable Settings error, and invalid saves do not overwrite a valid saved key. This validates input shape, not provider validity or quota.
+
+`GroqApiKeyInputTest` adds nine normalization/header-safety checks without making a network request. `GroqApiKeyPreferencesTest` adds four Robolectric save/migration/clear/rejection checks.

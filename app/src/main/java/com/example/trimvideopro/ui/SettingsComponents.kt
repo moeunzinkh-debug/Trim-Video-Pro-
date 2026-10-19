@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.trimvideopro.localization.AppLanguage
+import com.example.trimvideopro.settings.GroqApiKeyInput
 import com.example.trimvideopro.localization.tool
 import com.example.trimvideopro.localization.LocalAppStrings
 
@@ -454,7 +455,8 @@ fun AboutUsDialog(
 @Composable
 private fun GroqKeySettings(currentKey: String, onSave: (String) -> Unit) {
     val s = LocalAppStrings.current
-    var key by remember(currentKey) { mutableStateOf(currentKey) }
+    var key by remember(currentKey) { mutableStateOf(GroqApiKeyInput.normalize(currentKey)) }
+    var invalidKey by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
@@ -463,7 +465,16 @@ private fun GroqKeySettings(currentKey: String, onSave: (String) -> Unit) {
             Text(s.tool("Used for Whisper Large v3 transcription and AI sound-setting suggestions. Saved privately on this device and excluded from backups. Clear the field and save to remove it.",
                 "ប្រើសម្រាប់ Whisper Large v3 និងការណែនាំសំឡេង AI។ រក្សាទុកឯកជនលើឧបករណ៍ និងមិនបញ្ចូលក្នុងការបម្រុងទុក។ លុបអត្ថបទ រួចរក្សាទុកដើម្បីដកសោចេញ។"),
                 style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(value = key, onValueChange = { key = it; saved = false }, label = { Text("Groq API key") },
+            OutlinedTextField(value = key, onValueChange = {
+                key = GroqApiKeyInput.normalize(it); saved = false; invalidKey = false
+            }, label = { Text("Groq API key") },
+                isError = invalidKey,
+                supportingText = {
+                    Text(if (invalidKey) s.tool("Invalid key. Paste only your Groq key starting with gsk_.",
+                        "សោមិនត្រឹមត្រូវ។ សូមបញ្ចូលតែ Groq key ដែលចាប់ផ្ដើមដោយ gsk_។")
+                    else s.tool("Pasted spaces, line breaks and invisible formatting are removed automatically.",
+                        "កម្មវិធីដកចន្លោះ បន្ទាត់ថ្មី និងតួអក្សរលាក់ពីការចម្លងដោយស្វ័យប្រវត្តិ។"))
+                },
                 singleLine = true, modifier = Modifier.fillMaxWidth().testTag("groq_api_key_input"),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -472,7 +483,12 @@ private fun GroqKeySettings(currentKey: String, onSave: (String) -> Unit) {
                         Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, s.tool("Toggle key visibility", "បង្ហាញ / លាក់សោ"))
                     }
                 })
-            Button(onClick = { onSave(key.trim()); saved = true }, modifier = Modifier.testTag("save_groq_api_key")) {
+            Button(onClick = {
+                val cleaned = GroqApiKeyInput.normalize(key)
+                invalidKey = cleaned.isNotEmpty() && !GroqApiKeyInput.isValid(cleaned)
+                if (!invalidKey) { onSave(cleaned); key = cleaned; saved = true }
+                else saved = false
+            }, modifier = Modifier.testTag("save_groq_api_key")) {
                 Text(s.saveApiKey)
             }
             if (saved) Text(if (key.isBlank()) s.apiKeyCleared else s.apiKeySaved)

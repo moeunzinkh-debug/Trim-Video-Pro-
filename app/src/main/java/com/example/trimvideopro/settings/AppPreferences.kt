@@ -33,12 +33,25 @@ object AppPreferences {
         }.apply()
     }
 
-    fun getGroqApiKey(context: Context): String =
-        preferences(context).getString("groq_api_key", "").orEmpty()
+    fun getGroqApiKey(context: Context): String {
+        val store = preferences(context)
+        val saved = store.getString("groq_api_key", "").orEmpty()
+        val cleaned = GroqApiKeyInput.normalize(saved)
+        // Repair previously saved wrapped keys without making the user re-enter them.
+        // Invalid credentials remain editable in Settings and are never sent as headers.
+        if (cleaned != saved && (cleaned.isEmpty() || GroqApiKeyInput.isValid(cleaned))) {
+            store.edit().apply {
+                if (cleaned.isEmpty()) remove("groq_api_key") else putString("groq_api_key", cleaned)
+            }.apply()
+        }
+        return cleaned
+    }
 
     fun saveGroqApiKey(context: Context, key: String) {
+        val cleaned = GroqApiKeyInput.normalize(key)
+        if (cleaned.isNotEmpty()) GroqApiKeyInput.requireValid(cleaned)
         preferences(context).edit().apply {
-            if (key.isBlank()) remove("groq_api_key") else putString("groq_api_key", key.trim())
+            if (cleaned.isEmpty()) remove("groq_api_key") else putString("groq_api_key", cleaned)
         }.apply()
     }
 
