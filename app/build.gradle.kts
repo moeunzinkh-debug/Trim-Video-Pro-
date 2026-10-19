@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.trimvideopro.moenuo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 3
+    versionName = "1.1.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -42,6 +42,11 @@ android {
       val releaseSigning = signingConfigs.findByName("release")
       if (releaseSigning != null) {
         signingConfig = releaseSigning
+      } else if (System.getenv("ALLOW_TEST_SIGNING") == "true") {
+        // Explicit opt-in only: installable evaluation APK, never a production signing identity.
+        signingConfig = signingConfigs.getByName("debug")
+        applicationIdSuffix = ".test"
+        resValue("string", "app_name", "Trim Video Pro (Test)")
       }
     }
     debug {
@@ -52,6 +57,7 @@ android {
     targetCompatibility = JavaVersion.VERSION_11
   }
   buildFeatures {
+    resValues = true
     compose = true
     buildConfig = true
   }
@@ -70,6 +76,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  implementation("androidx.media3:media3-transformer:1.8.0")
+  implementation("androidx.media3:media3-effect:1.8.0")
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

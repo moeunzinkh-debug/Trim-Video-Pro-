@@ -199,7 +199,7 @@ val EnglishStrings = AppStrings(
     shareTranscript = "Share Transcript",
     errorSharing = "Error sharing transcript",
     transcriptLanguage = "Source language",
-    autoDetectLanguage = "Auto-detect (English or Khmer)",
+    autoDetectLanguage = "Auto-detect (90+ languages)",
     noTranscriptAvailable = "No transcript available. Generate one first!",
     chunkIndex = "Chunk",
     timestamp = "Timestamp",
@@ -265,12 +265,12 @@ val EnglishStrings = AppStrings(
     homeTools = "Tools",
     featureTrimDescription = "Cut the exact part you need with a precise timeline.",
     featureSplitDescription = "Split by time interval or into equal clips.",
-    featureTranscriptDescription = "Turn speech into text with Gemini AI.",
+    featureTranscriptDescription = "Transcribe with Gemini or Groq Whisper.",
     featureHistoryDescription = "Play, share and save your exported clips.",
     openTool = "Open",
     back = "Back",
     selectMediaHint = "Select a video or audio file above to use this tool.",
-    homePrivacyNote = "100% offline editing • Your files stay on this device"
+    homePrivacyNote = "Offline editing • Transcription uploads media to your selected AI provider"
 )
 
 val KhmerStrings = AppStrings(
@@ -325,7 +325,7 @@ val KhmerStrings = AppStrings(
     shareTranscript = "ចែក",
     errorSharing = "បរាជ័យ",
     transcriptLanguage = "ភាសាដើម",
-    autoDetectLanguage = "ស្គាល់ដោយស្វ័យប្រវត្តិ (អង់គ្លេស ឬ ខ្មែរ)",
+    autoDetectLanguage = "ស្គាល់ដោយស្វ័យប្រវត្តិ (ជាង 90 ភាសា)",
     noTranscriptAvailable = "គ្មានអត្ថបទទេ។ សូមបង្កើតជាមុនសិន!",
     chunkIndex = "ផ្នែក",
     timestamp = "ពេល",
@@ -388,12 +388,12 @@ val KhmerStrings = AppStrings(
     homeTools = "ឧបករណ៍",
     featureTrimDescription = "កាត់យកផ្នែកដែលអ្នកចង់បាន តាម Timeline។",
     featureSplitDescription = "ពុះតាមចន្លោះពេល ឬ ជាចំនួន Clip ស្មើៗ។",
-    featureTranscriptDescription = "បំប្លែងសំឡេងទៅជាអត្ថបទ ដោយ Gemini AI។",
+    featureTranscriptDescription = "បម្លែងសំឡេងដោយ Gemini ឬ Groq Whisper។",
     featureHistoryDescription = "មើល ចែករំលែក និង រក្សាទុក Clip របស់អ្នក។",
     openTool = "បើក",
     back = "ត្រឡប់",
     selectMediaHint = "សូមជ្រើសរើសវីដេអូ ឬ សំឡេងខាងលើ ដើម្បីប្រើឧបករណ៍នេះ។",
-    homePrivacyNote = "កាត់តអូហ្វឡាញ 100% • ឯកសាររបស់អ្នកនៅលើឧបករណ៍នេះ"
+    homePrivacyNote = "កាត់តអូហ្វឡាញ • បម្លែងអត្ថបទផ្ញើឯកសារទៅ AI ដែលបានជ្រើស"
 )
 
 val LocalAppStrings = staticCompositionLocalOf { EnglishStrings }

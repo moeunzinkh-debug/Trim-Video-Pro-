@@ -21,7 +21,7 @@ data class TranscriptChunk(
         val minutes = (totalSeconds % 3600) / 60
         val seconds = totalSeconds % 60
         val millis = (ms % 1000)
-        return String.format("%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
+        return String.format(java.util.Locale.ROOT, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
     }
 }
 
@@ -31,8 +31,8 @@ data class TranscriptChunk(
 data class Transcript(
     val videoUri: String,
     val chunks: List<TranscriptChunk>,
-    /** en, km, or auto (automatic detection limited to English and Khmer). */
-    val language: String = "auto",
+    /** Source-language code (90+ languages), or auto for provider detection. */
+    val language: String = TranscriptLanguages.AUTO,
     val generatedAt: Long = System.currentTimeMillis()
 ) {
     fun toSrtFormat(): String {
@@ -66,8 +66,8 @@ sealed class TranscriptStatus {
  * Configuration for transcript generation
  */
 data class TranscriptConfig(
-    /** en, km, or auto (automatic detection limited to English and Khmer). */
-    val language: String = "auto",
+    /** Source-language code (90+ languages), or auto for provider detection. */
+    val language: String = TranscriptLanguages.AUTO,
     val chunkDurationMs: Long = 5000L, // Default 5 second chunks
     val includeTimestamps: Boolean = true
 )

@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.trimvideopro.localization.tool
 import com.example.trimvideopro.localization.LocalAppStrings
 import com.example.trimvideopro.model.ProcessedVideo
 import com.example.trimvideopro.processor.VideoProcessor
@@ -177,10 +178,11 @@ fun ExportHistoryView(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    VideoPlayerView(
-                        videoUri = uri,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    if (uri.path?.endsWith(".wav") == true || uri.path?.endsWith(".m4a") == true) {
+                        AudioPlayerView(audioUri = uri, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        VideoPlayerView(videoUri = uri, modifier = Modifier.fillMaxWidth())
+                    }
                     TextButton(
                         onClick = { playingVideoUri = null },
                         modifier = Modifier.align(Alignment.End)
@@ -292,7 +294,7 @@ fun VideoClipCard(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = strings.saveToGallery, fontSize = 11.sp, maxLines = 1)
+                        Text(text = if (video.title.endsWith(".wav") || video.title.endsWith(".m4a")) strings.tool("Save to music", "រក្សាទុកក្នុងតន្ត្រី") else strings.saveToGallery, fontSize = 11.sp, maxLines = 1)
                     }
                 }
 
@@ -319,8 +321,12 @@ fun VideoClipCard(
 private fun shareVideo(context: Context, video: ProcessedVideo) {
     try {
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "video/mp4"
-            putExtra(Intent.EXTRA_STREAM, video.uri)
+            type = com.example.trimvideopro.processor.MediaExport.mimeType(video.title)
+            val sharedUri = if (video.uri.scheme == "file") androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.files", java.io.File(video.uri.path!!)
+            ) else video.uri
+            putExtra(Intent.EXTRA_STREAM, sharedUri)
+            clipData = android.content.ClipData.newRawUri(video.title, sharedUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, video.title))

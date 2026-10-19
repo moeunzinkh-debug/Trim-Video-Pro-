@@ -11,6 +11,9 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.trimvideopro.localization.tool
+import com.example.trimvideopro.processor.TranscriptExportProcessor
+import com.example.trimvideopro.processor.TranscriptExportFormat
 import com.example.trimvideopro.localization.AppLanguage
 import com.example.trimvideopro.localization.EnglishStrings
 import com.example.trimvideopro.localization.KhmerStrings
@@ -25,6 +28,17 @@ import com.example.trimvideopro.model.VideoMetadata
 import com.example.trimvideopro.processor.TranscriptProcessor
 import com.example.trimvideopro.processor.VideoProcessor
 import com.example.trimvideopro.settings.AppPreferences
+import com.example.trimvideopro.model.AudioEffects
+import com.example.trimvideopro.model.TranscriptLanguages
+import com.example.trimvideopro.model.TranscriptProvider
+import com.example.trimvideopro.processor.AudioProcessor
+import com.example.trimvideopro.processor.AudioSegments
+import com.example.trimvideopro.processor.MergeProcessor
+import com.example.trimvideopro.processor.GroqProcessor
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +47,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class VideoUiState(
+    val mergeSources: List<VideoMetadata> = emptyList(),
+    val isLoadingMerge: Boolean = false,
+    val effects: AudioEffects = AudioEffects(),
+    val isRecommending: Boolean = false,
+    val recommendation: String? = null,
+    val toolError: String? = null,
+    val transcriptProvider: TranscriptProvider = TranscriptProvider.GEMINI,
     val language: AppLanguage = AppLanguage.fromLocale(),
     val selectedVideoUri: Uri? = null,
     /** True when a user-provided Gemini key is saved in private app preferences. */
@@ -59,6 +80,7 @@ data class VideoUiState(
     val statusMessage: String? = null,
     
     // Transcript state
+    val transcriptExportNotice: String? = null,
     val transcriptStatus: TranscriptStatus = TranscriptStatus.Idle,
     val transcript: Transcript? = null,
     val transcriptProgress: Float = 0f,
@@ -78,6 +100,7 @@ data class VideoUiState(
 
 class VideoViewModel(application: Application) : AndroidViewModel(application) {
 
+    private var transcriptJob: Job? = null
     private val _uiState = MutableStateFlow(VideoUiState())
     val uiState: StateFlow<VideoUiState> = _uiState.asStateFlow()
 
@@ -87,6 +110,7 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 language = savedLanguage,
+                transcriptProvider = AppPreferences.getTranscriptProvider(context),
                 apiKeyConfigured = AppPreferences.getSavedApiKey(context).isNotBlank()
             )
         }
@@ -121,6 +145,8 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectVideo(context: Context, uri: Uri) {
+        if (_uiState.value.isProcessing) return
+        transcriptJob?.cancel()
         viewModelScope.launch {
             try {
                 context.contentResolver.takePersistableUriPermission(
@@ -137,11 +163,13 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
                     previewThumbnail = null,
                     transcriptStatus = TranscriptStatus.Idle,
                     transcript = null,
+                    transcriptExportNotice = null,
                     selectedTranscriptChunk = null,
                     statusMessage = null
                 )
             }
             val meta = VideoProcessor.extractMetadata(context, uri)
+            if (_uiState.value.selectedVideoUri != uri) return@launch
             if (meta != null) {
                 val thumb = if (meta.mimeType.startsWith("audio/")) {
                     null
@@ -167,8 +195,10 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateTrimRange(startMs: Long, endMs: Long) {
         val meta = _uiState.value.metadata ?: return
-        val validStart = startMs.coerceIn(0L, meta.durationMs - 500L)
-        val validEnd = endMs.coerceIn(validStart + 500L, meta.durationMs)
+        if (meta.durationMs <= 0) return
+        val minimum = minOf(500L, meta.durationMs)
+        val validStart = startMs.coerceIn(0L, meta.durationMs - minimum)
+        val validEnd = endMs.coerceIn(validStart + minimum, meta.durationMs)
         _uiState.update {
             it.copy(trimStartMs = validStart, trimEndMs = validEnd)
         }
@@ -479,6 +509,10 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearCache(context: Context) {
+        if (_uiState.value.isProcessing || _uiState.value.isRecommending ||
+            (_uiState.value.transcriptStatus !is TranscriptStatus.Idle &&
+             _uiState.value.transcriptStatus !is TranscriptStatus.Success &&
+             _uiState.value.transcriptStatus !is TranscriptStatus.Error)) return
         viewModelScope.launch {
             try {
                 context.cacheDir.deleteRecursively()
@@ -509,14 +543,14 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadExportedVideos() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
             val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "TrimmedVideos")
             val list = mutableListOf<ProcessedVideo>()
 
             if (dir.exists() && dir.isDirectory) {
                 dir.listFiles()?.forEach { file ->
-                    if (file.isFile && file.extension == "mp4") {
+                    if (file.isFile && file.extension.lowercase() in setOf("mp4", "wav", "m4a")) {
                         val retriever = MediaMetadataRetriever()
                         var durationMs = 0L
                         try {
@@ -547,32 +581,156 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+
+    fun setTranscriptProvider(provider: TranscriptProvider) {
+        AppPreferences.saveTranscriptProvider(getApplication(), provider)
+        _uiState.update { it.copy(transcriptProvider = provider) }
+    }
+
+    fun updateEffects(effects: AudioEffects) {
+        if (!_uiState.value.isProcessing && !_uiState.value.isRecommending) {
+            _uiState.update { it.copy(effects = effects.bounded(), recommendation = null) }
+        }
+    }
+
+    fun recommendEffects(context: Context, goal: String) {
+        if (_uiState.value.isRecommending || _uiState.value.isProcessing) return
+        _uiState.update { it.copy(isRecommending = true, toolError = null) }
+        viewModelScope.launch {
+            try {
+                val (effects, reason) = GroqProcessor.recommend(context, goal)
+                _uiState.update { it.copy(effects = effects, recommendation = reason) }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { _uiState.update { it.copy(toolError = e.message ?: "Recommendation failed.") } } finally { _uiState.update { it.copy(isRecommending = false) } }
+        }
+    }
+
+    fun addMergeSources(context: Context, uris: List<Uri>) {
+        if (_uiState.value.isLoadingMerge || _uiState.value.isProcessing) return
+        _uiState.update { it.copy(isLoadingMerge = true, toolError = null) }
+        viewModelScope.launch {
+            try {
+                require(_uiState.value.mergeSources.size + uris.size <= 20) { "Maximum 20 videos." }
+                val added = uris.map { uri ->
+                    runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                    val meta = VideoProcessor.extractMetadata(context, uri) ?: error("Cannot read a selected video.")
+                    require(!meta.mimeType.startsWith("audio/") && meta.durationMs > 0) { "Choose video files with a valid duration." }
+                    meta
+                }
+                _uiState.update { it.copy(mergeSources = it.mergeSources + added) }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { _uiState.update { it.copy(toolError = e.message) } } finally { _uiState.update { it.copy(isLoadingMerge = false) } }
+        }
+    }
+
+    fun moveMergeSource(index: Int, delta: Int) {
+        if (_uiState.value.isProcessing) return
+        _uiState.update {
+            val list = it.mergeSources.toMutableList()
+            val target = index + delta
+            if (index in list.indices && target in list.indices) {
+                val item = list.removeAt(index)
+                list.add(target, item)
+            }
+            it.copy(mergeSources = list)
+        }
+    }
+
+    fun removeMergeSource(index: Int) {
+        if (!_uiState.value.isProcessing) _uiState.update {
+            it.copy(mergeSources = it.mergeSources.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    fun executeMerge(context: Context) {
+        val uris = _uiState.value.mergeSources.map { it.uri }
+        runMediaTool {
+            listOf(MergeProcessor.merge(context, uris) { progress ->
+                _uiState.update { it.copy(processingProgress = progress) }
+            })
+        }
+    }
+
+    fun executeAudio(context: Context, split: Boolean = false, applyEffects: Boolean = false) {
+        val state = _uiState.value
+        val uri = state.selectedVideoUri ?: return
+        val duration = state.metadata?.durationMs ?: return
+        runMediaTool {
+            val ranges = if (!split) listOf(0L to duration) else if (state.splitMode == SplitMode.BY_PARTS)
+                AudioSegments.byParts(duration, state.splitPartsCount)
+            else AudioSegments.byDuration(duration, state.splitIntervalSec)
+            val results = mutableListOf<ProcessedVideo>()
+            try {
+                ranges.forEachIndexed { index, (start, end) ->
+                    _uiState.update { it.copy(processingClipIndex = index + 1, totalClipsToProcess = ranges.size) }
+                    results.add(AudioProcessor.render(context, uri, start, end,
+                        if (applyEffects) state.effects else AudioEffects(),
+                        if (split) "Split_Audio_${index + 1}" else if (applyEffects) "Edited_Audio" else "Extracted_Audio"
+                    ) { progress -> _uiState.update { it.copy(processingProgress = progress) } })
+                }
+                results
+            } catch (e: Throwable) {
+                results.forEach { File(it.uri.path.orEmpty()).delete() }
+                throw e
+            }
+        }
+    }
+
+    private fun runMediaTool(work: suspend () -> List<ProcessedVideo>) {
+        if (_uiState.value.isProcessing || _uiState.value.isRecommending) return
+        _uiState.update { it.copy(isProcessing = true, processingProgress = 0f, processingClipIndex = 1,
+            totalClipsToProcess = 1, toolError = null) }
+        viewModelScope.launch {
+            try {
+                val results = work()
+                _uiState.update { it.copy(completedClips = results, showCompletionDialog = true) }
+                loadExportedVideos()
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { _uiState.update { it.copy(toolError = e.message ?: "Media processing failed.") } } finally { _uiState.update { it.copy(isProcessing = false) } }
+        }
+    }
+
     // ========== Transcript Functions ==========
 
     fun generateTranscript(context: Context, language: String = "auto") {
+        if (transcriptJob?.isActive == true) return
+        if (_uiState.value.transcriptStatus !is TranscriptStatus.Idle &&
+            _uiState.value.transcriptStatus !is TranscriptStatus.Success &&
+            _uiState.value.transcriptStatus !is TranscriptStatus.Error) return
         val uri = _uiState.value.selectedVideoUri ?: return
         val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
 
-        viewModelScope.launch {
+        val provider = _uiState.value.transcriptProvider
+        transcriptJob = viewModelScope.launch {
+            val generationContext = coroutineContext
             _uiState.update {
                 it.copy(
                     transcriptStatus = TranscriptStatus.ExtractingAudio,
+                    transcript = null,
+                    selectedTranscriptChunk = null,
+                    transcriptExportNotice = null,
                     transcriptProgress = 0f,
                     transcriptProgressMessage = strings.extractingAudio
                 )
             }
 
-            val requestedLanguage = when (language.lowercase()) {
-                "en", "english" -> "en"
-                "km", "khmer" -> "km"
-                else -> "auto"
-            }
+            val requestedLanguage = TranscriptLanguages.normalize(language)
             val config = TranscriptConfig(language = requestedLanguage)
-            val result = TranscriptProcessor.generateTranscript(
+            var failure: String? = null
+            val result = try {
+                if (provider == TranscriptProvider.GROQ_WHISPER) {
+                    GroqProcessor.transcribe(context, uri, requestedLanguage, _uiState.value.metadata?.durationMs ?: 0,
+                        onPartialTranscript = { partial ->
+                            generationContext.ensureActive()
+                            _uiState.update { it.copy(transcript = partial) }
+                        }
+                    ) { progress, message ->
+                        generationContext.ensureActive()
+                        _uiState.update { it.copy(transcriptProgress = progress, transcriptProgressMessage = message) }
+                    }
+                } else TranscriptProcessor.generateTranscript(
                 context = context,
                 videoUri = uri,
                 config = config
             ) { progress, message ->
+                generationContext.ensureActive()
                 _uiState.update {
                     it.copy(
                         transcriptProgress = progress,
@@ -580,6 +738,9 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { failure = e.message; null }
+            if (_uiState.value.selectedVideoUri != uri) return@launch
 
             if (result != null) {
                 _uiState.update {
@@ -594,12 +755,12 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 _uiState.update {
                     it.copy(
-                        transcriptStatus = TranscriptStatus.Error(strings.transcriptError),
+                        transcriptStatus = TranscriptStatus.Error(failure ?: strings.transcriptError),
                         transcriptProgress = 0f,
-                        transcriptProgressMessage = strings.transcriptError
+                        transcriptProgressMessage = failure ?: strings.transcriptError
                     )
                 }
-                Toast.makeText(context, strings.transcriptError, Toast.LENGTH_LONG).show()
+                Toast.makeText(context, failure ?: strings.transcriptError, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -612,78 +773,24 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedTranscriptChunk = chunk) }
     }
 
-    fun exportTranscriptToSrt(context: Context) {
+    fun exportTranscriptToSrt(context: Context) = exportTranscript(context, TranscriptExportFormat.SRT)
+    fun exportTranscriptToVtt(context: Context) = exportTranscript(context, TranscriptExportFormat.VTT)
+    fun exportTranscriptToText(context: Context) = exportTranscript(context, TranscriptExportFormat.TEXT)
+
+    private fun exportTranscript(context: Context, format: TranscriptExportFormat) {
         val transcript = _uiState.value.transcript ?: return
         val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
         viewModelScope.launch {
             try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.srt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToSrt(transcript, outputFile.absolutePath)
-                if (success) {
-                    // Also save to Downloads folder
-                    saveToDownloads(context, outputFile, "srt")
-                    Toast.makeText(context, strings.srtExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    fun exportTranscriptToVtt(context: Context) {
-        val transcript = _uiState.value.transcript ?: return
-        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
-        viewModelScope.launch {
-            try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.vtt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToVtt(transcript, outputFile.absolutePath)
-                if (success) {
-                    saveToDownloads(context, outputFile, "vtt")
-                    Toast.makeText(context, strings.vttExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    fun exportTranscriptToText(context: Context) {
-        val transcript = _uiState.value.transcript ?: return
-        val strings = if (_uiState.value.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
-
-        viewModelScope.launch {
-            try {
-                val outputDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "Transcripts")
-                if (!outputDir.exists()) outputDir.mkdirs()
-
-                val fileName = "transcript_${System.currentTimeMillis() % 10000}.txt"
-                val outputFile = File(outputDir, fileName)
-
-                val success = TranscriptProcessor.exportToTextWithTimestamps(transcript, outputFile.absolutePath)
-                if (success) {
-                    saveToDownloads(context, outputFile, "txt")
-                    Toast.makeText(context, strings.txtExportedSuccess, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, strings.errorSaving, Toast.LENGTH_SHORT).show()
+                val path = TranscriptExportProcessor.save(context, transcript, format)
+                val message = strings.tool("Saved to $path", "បានរក្សាទុកនៅ $path")
+                _uiState.update { it.copy(transcriptExportNotice = message) }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                val message = strings.tool("Download failed. Check storage space/permission. ${e.message}",
+                    "ការរក្សាទុកទៅ Downloads បរាជ័យ។ សូមពិនិត្យទំហំផ្ទុក និងសិទ្ធិ។ ${e.message}")
+                _uiState.update { it.copy(transcriptExportNotice = message) }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -713,40 +820,6 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun saveToDownloads(context: Context, sourceFile: File, extension: String) {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, sourceFile.name)
-                    put(MediaStore.Downloads.MIME_TYPE, when (extension) {
-                        "srt" -> "application/x-subrip"
-                        "vtt" -> "text/vtt"
-                        else -> "text/plain"
-                    })
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/TrimVideoPro/Transcripts")
-                }
-
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                uri?.let {
-                    resolver.openOutputStream(it)?.use { outputStream ->
-                        sourceFile.inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-                }
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val trimDir = File(downloadsDir, "TrimVideoPro/Transcripts")
-                if (!trimDir.exists()) trimDir.mkdirs()
-                val destFile = File(trimDir, sourceFile.name)
-                sourceFile.copyTo(destFile, overwrite = true)
-            }
-        } catch (e: Exception) {
-            // Silently fail, file is already saved to app directory
-        }
-    }
-
     private fun formatTimestamp(ms: Long): String {
         val totalSeconds = ms / 1000
         val hours = totalSeconds / 3600
@@ -756,6 +829,7 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearTranscript() {
+        transcriptJob?.cancel()
         _uiState.update {
             it.copy(
                 transcriptStatus = TranscriptStatus.Idle,

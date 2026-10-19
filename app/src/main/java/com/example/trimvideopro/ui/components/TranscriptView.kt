@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.trimvideopro.localization.tool
+import com.example.trimvideopro.model.TranscriptLanguages
 import com.example.trimvideopro.localization.LocalAppStrings
 import com.example.trimvideopro.model.Transcript
 import com.example.trimvideopro.model.TranscriptChunk
@@ -52,14 +55,13 @@ fun TranscriptView(
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
-    // Auto-detect is the safe default. The only explicit target languages are
-    // English and Khmer.
-    var selectedLanguage by remember { mutableStateOf("auto") }
-    val languages = listOf(
-        "auto" to "✨ ${strings.autoDetectLanguage}",
-        "en" to "🇬🇧 English",
-        "km" to "🇰🇭 Khmer"
-    )
+    // Source detection is independent of the English/Khmer app UI setting.
+    var selectedLanguage by rememberSaveable { mutableStateOf(TranscriptLanguages.AUTO) }
+    val languages = listOf(TranscriptLanguages.AUTO to "✨ ${strings.autoDetectLanguage}") +
+        TranscriptLanguages.supported.map { it.code to it.name }
+    val generating = transcriptStatus is TranscriptStatus.ExtractingAudio ||
+        transcriptStatus is TranscriptStatus.SendingToGemini ||
+        transcriptStatus is TranscriptStatus.ProcessingResponse
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -101,12 +103,13 @@ fun TranscriptView(
 
                 ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onExpandedChange = { expanded = it }
+                    onExpandedChange = { if (!generating) expanded = it }
                 ) {
                     OutlinedTextField(
                         value = selectedLangName,
                         onValueChange = {},
                         readOnly = true,
+                        enabled = !generating,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -115,7 +118,8 @@ fun TranscriptView(
                     )
                     ExposedDropdownMenu(
                         expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.heightIn(max = 320.dp)
                     ) {
                         languages.forEach { (code, name) ->
                             DropdownMenuItem(
@@ -128,6 +132,12 @@ fun TranscriptView(
                         }
                     }
                 }
+
+                Text(
+                    strings.tool("Default: auto-detect the source from 90+ languages. Transcripts keep the original language and script; no translation.",
+                        "លំនាំដើម៖ ស្គាល់ភាសាដើមដោយស្វ័យប្រវត្តិ ពីជាង 90 ភាសា។ រក្សាភាសា និងអក្សរដើម ដោយមិនបកប្រែ។"),
+                    style = MaterialTheme.typography.bodySmall
+                )
 
                 // Generate Button
                 Button(
@@ -232,6 +242,13 @@ fun TranscriptView(
 
         // Transcript Display
         if (transcript != null && transcript.chunks.isNotEmpty()) {
+            if (transcript.language != TranscriptLanguages.AUTO) {
+                Text("${strings.transcriptLanguage}: ${TranscriptLanguages.displayName(transcript.language)}",
+                    style = MaterialTheme.typography.labelLarge)
+            }
+            Text(strings.tool("SRT, TXT and VTT exports are saved to Downloads/TrimVideoPro/Transcripts. Open your phone's Files app → Downloads to find them.",
+                "ឯកសារ SRT, TXT និង VTT រក្សាទុកនៅ Downloads/TrimVideoPro/Transcripts។ បើកកម្មវិធី Files របស់ទូរសព្ទ → Downloads ដើម្បីរកឯកសារ។"),
+                style = MaterialTheme.typography.bodySmall)
             // Export Options
             Card(
                 modifier = Modifier.fillMaxWidth(),

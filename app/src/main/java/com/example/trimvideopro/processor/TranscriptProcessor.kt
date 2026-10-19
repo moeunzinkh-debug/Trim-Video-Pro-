@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.trimvideopro.model.Transcript
 import com.example.trimvideopro.model.TranscriptChunk
 import com.example.trimvideopro.model.TranscriptConfig
+import com.example.trimvideopro.model.TranscriptLanguages
 import com.example.trimvideopro.settings.AppPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -236,11 +237,10 @@ object TranscriptProcessor {
     }
 
     private fun buildPrompt(language: String): String {
-        val languageInstruction = when (normalizeLanguage(language)) {
-            "km" -> "Transcribe the speech in Khmer."
-            "en" -> "Transcribe the speech in English."
-            else -> "Automatically detect the speech language. It will be English or Khmer."
-        }
+        val sourceLanguage = normalizeLanguage(language)
+        val languageInstruction = if (sourceLanguage == TranscriptLanguages.AUTO)
+            "Automatically detect the spoken source language from the audio across all supported languages."
+        else "The source language is ${TranscriptLanguages.displayName(sourceLanguage)} ($sourceLanguage). Transcribe in that language."
 
         return """
             Transcribe all spoken words in the attached media.
@@ -252,13 +252,7 @@ object TranscriptProcessor {
         """.trimIndent()
     }
 
-    private fun normalizeLanguage(language: String): String {
-        return when (language.lowercase(Locale.US)) {
-            "en", "english" -> "en"
-            "km", "khmer" -> "km"
-            else -> "auto"
-        }
-    }
+    private fun normalizeLanguage(language: String): String = TranscriptLanguages.normalize(language)
 
     /** Creates useful approximate timestamps because the REST response is plain text. */
     private fun parseTranscriptWithTimestamps(
