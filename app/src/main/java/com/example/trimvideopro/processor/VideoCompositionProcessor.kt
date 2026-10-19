@@ -50,7 +50,20 @@ object VideoCompositionProcessor {
                             for (count in 1..8) {
                                 val matrix = FloatArray(count * 2)
                                 if (count == 1) { matrix[0] = 1f; matrix[1] = 1f }
-                                else { matrix[0] = 1f; matrix[3] = 1f }
+                                else {
+                                    matrix[0] = 1f; matrix[3] = 1f
+                                    // Keep center dialogue and surround content when downmixing multi-channel sources.
+                                    if (count > 2) { matrix[4] = 0.707f; matrix[5] = 0.707f }
+                                    for (channel in 3 until count) {
+                                        val weight = if (channel == 3) 0.25f else 0.5f
+                                        matrix[channel * 2] = weight
+                                        matrix[channel * 2 + 1] = weight
+                                    }
+                                    val left = (0 until count).sumOf { matrix[it * 2].toDouble() }
+                                    val right = (0 until count).sumOf { matrix[it * 2 + 1].toDouble() }
+                                    val normalization = maxOf(left, right, 1.0).toFloat()
+                                    for (i in matrix.indices) matrix[i] /= normalization
+                                }
                                 putChannelMixingMatrix(ChannelMixingMatrix(count, 2, matrix))
                             }
                         }

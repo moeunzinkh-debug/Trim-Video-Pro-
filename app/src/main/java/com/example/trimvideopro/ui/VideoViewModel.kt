@@ -703,6 +703,9 @@ class VideoViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 it.copy(
                     transcriptStatus = TranscriptStatus.ExtractingAudio,
+                    transcript = null,
+                    selectedTranscriptChunk = null,
+                    transcriptExportNotice = null,
                     transcriptProgress = 0f,
                     transcriptProgressMessage = strings.extractingAudio
                 )

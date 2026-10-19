@@ -46,6 +46,19 @@ class GroqTranscriptTest {
         check(transcript.getFullText() == "Hello world")
     }
 
+    @Test fun continuationUsesSourceTimestampsAndClampsToPartLength() {
+        val part = GroqProcessor.parseTranscript("""{
+            "language":"khmer", "segments":[
+                {"start":0.25,"end":1.75,"text":"សួស្តី"},
+                {"start":2.5,"end":10,"text":"លោកអ្នក"}
+            ]
+        }""", "source", "auto", 4000)
+        val shifted = GroqProcessor.shiftedChunks(part, 480000, 4000, 12)
+        check(shifted[0].startMs == 480250L && shifted[0].endMs == 481750L)
+        check(shifted[1].startMs == 482500L && shifted[1].endMs == 484000L)
+        check(shifted.map { it.index } == listOf(12, 13))
+    }
+
     @Test fun missingSpeechIsAnActionableError() {
         check(runCatching { GroqProcessor.parseTranscript("""{"text":"","segments":[]}""", "source", "auto", 0) }.isFailure)
     }

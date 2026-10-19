@@ -68,12 +68,7 @@ object GroqProcessor {
                         .header("Authorization", "Bearer $key").post(form.build()).build()
                     val transcript = parseTranscript(execute(request), uri.toString(), language, chunk.durationMs)
                     languages.add(transcript.language)
-                    transcript.chunks.forEach { segment ->
-                        val start = segment.startMs.coerceIn(0, chunk.durationMs)
-                        val end = segment.endMs.coerceIn(start, chunk.durationMs)
-                        if (end > start) combined.add(segment.copy(index = combined.size,
-                            startMs = start + chunk.sourceStartMs, endMs = end + chunk.sourceStartMs))
-                    }
+                    combined.addAll(shiftedChunks(transcript, chunk.sourceStartMs, chunk.durationMs, combined.size))
                     if (combined.isNotEmpty()) onPartialTranscript(Transcript(uri.toString(), combined.toList(),
                         if (languages.size == 1) languages.first() else "multilingual"))
                 } catch (_: NoSpeechDetectedException) {
@@ -86,6 +81,17 @@ object GroqProcessor {
             onProgress(1f, "All ${chunks.size} audio parts transcribed")
             Transcript(uri.toString(), combined, if (languages.size == 1) languages.first() else "multilingual")
         } finally { chunks.forEach { it.file.delete() } }
+    }
+
+    internal fun shiftedChunks(transcript: Transcript, sourceStartMs: Long, durationMs: Long, indexOffset: Int): List<TranscriptChunk> {
+        val shifted = mutableListOf<TranscriptChunk>()
+        transcript.chunks.forEach { segment ->
+            val start = segment.startMs.coerceIn(0, durationMs)
+            val end = segment.endMs.coerceIn(start, durationMs)
+            if (end > start) shifted.add(segment.copy(index = indexOffset + shifted.size,
+                startMs = start + sourceStartMs, endMs = end + sourceStartMs))
+        }
+        return shifted
     }
 
     private class NoSpeechDetectedException : IllegalArgumentException("No speech was detected in this media.")
