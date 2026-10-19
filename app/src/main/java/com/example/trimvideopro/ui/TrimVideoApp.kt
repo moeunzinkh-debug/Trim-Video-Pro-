@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.trimvideopro.localization.tool
+import com.example.trimvideopro.localization.toolTitle
 import com.example.trimvideopro.localization.AppLanguage
 import com.example.trimvideopro.localization.AppStrings
 import com.example.trimvideopro.localization.EnglishStrings
@@ -79,6 +81,10 @@ enum class AppScreen {
     TRIM,
     SPLIT,
     TRANSCRIPT,
+    MERGE,
+    EXTRACT_AUDIO,
+    SPLIT_AUDIO,
+    AUDIO_EDITOR,
     HISTORY
 }
 
@@ -106,6 +112,24 @@ fun TrimVideoApp(
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.selectVideo(context, uri)
+        }
+    }
+
+    var pendingStorageAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val action = pendingStorageAction
+        pendingStorageAction = null
+        if (granted) action?.invoke() else android.widget.Toast.makeText(context,
+            strings.tool("Storage permission is needed to save on Android 7–9.", "ត្រូវការសិទ្ធិផ្ទុក ដើម្បីរក្សាទុកលើ Android 7–9។"),
+            android.widget.Toast.LENGTH_LONG).show()
+    }
+    val withStoragePermission: (() -> Unit) -> Unit = { action ->
+        if (android.os.Build.VERSION.SDK_INT >= 29 || androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED) action()
+        else {
+            pendingStorageAction = action
+            storagePermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 
@@ -183,7 +207,13 @@ fun TrimVideoApp(
                         onSplit = { viewModel.executeSplit(context) }
                     )
 
+                    AppScreen.MERGE -> MergeScreen(state, viewModel)
+                    AppScreen.EXTRACT_AUDIO, AppScreen.SPLIT_AUDIO, AppScreen.AUDIO_EDITOR ->
+                        AudioToolScreen(targetScreen, state, viewModel)
+
                     AppScreen.TRANSCRIPT -> TranscriptScreen(
+                        provider = state.transcriptProvider,
+                        onProviderChange = viewModel::setTranscriptProvider,
                         selectedVideoUri = state.selectedVideoUri,
                         metadata = state.metadata,
                         isExtractingMetadata = state.isExtractingMetadata,
@@ -212,10 +242,10 @@ fun TrimVideoApp(
                         videos = state.exportedVideos,
                         onDeleteVideo = { viewModel.deleteExportedVideo(it) },
                         onClearAll = { viewModel.clearAllExportedVideos(context) },
-                        onSaveToGallery = { video -> viewModel.saveVideoToGallery(context, video) },
-                        onSaveToStorage = { video -> viewModel.saveVideoToStorage(context, video) },
-                        onSaveAllToGallery = { viewModel.saveAllToGallery(context, state.exportedVideos) },
-                        onSaveAllToStorage = { viewModel.saveAllToStorage(context, state.exportedVideos) }
+                        onSaveToGallery = { video -> withStoragePermission { viewModel.saveVideoToGallery(context, video) } },
+                        onSaveToStorage = { video -> withStoragePermission { viewModel.saveVideoToStorage(context, video) } },
+                        onSaveAllToGallery = { withStoragePermission { viewModel.saveAllToGallery(context, state.exportedVideos) } },
+                        onSaveAllToStorage = { withStoragePermission { viewModel.saveAllToStorage(context, state.exportedVideos) } }
                     )
                 }
             }
@@ -264,10 +294,10 @@ fun TrimVideoApp(
         if (state.showCompletionDialog && !state.completedClips.isNullOrEmpty()) {
             TrimCompletionDialog(
                 videos = state.completedClips!!,
-                onSaveToGallery = { video -> viewModel.saveVideoToGallery(context, video) },
-                onSaveToStorage = { video -> viewModel.saveVideoToStorage(context, video) },
-                onSaveAllToGallery = { viewModel.saveAllToGallery(context, state.completedClips!!) },
-                onSaveAllToStorage = { viewModel.saveAllToStorage(context, state.completedClips!!) },
+                onSaveToGallery = { video -> withStoragePermission { viewModel.saveVideoToGallery(context, video) } },
+                onSaveToStorage = { video -> withStoragePermission { viewModel.saveVideoToStorage(context, video) } },
+                onSaveAllToGallery = { withStoragePermission { viewModel.saveAllToGallery(context, state.completedClips!!) } },
+                onSaveAllToStorage = { withStoragePermission { viewModel.saveAllToStorage(context, state.completedClips!!) } },
                 onDismiss = { viewModel.dismissCompletionDialog() }
             )
         }
@@ -284,6 +314,8 @@ fun TrimVideoApp(
             SettingsBottomSheet(
                 currentLanguage = state.language,
                 currentApiKey = AppPreferences.getSavedApiKey(context),
+                currentGroqKey = AppPreferences.getGroqApiKey(context),
+                onSaveGroqKey = { AppPreferences.saveGroqApiKey(context, it) },
                 onLanguageSelected = { viewModel.setLanguage(it) },
                 onSaveApiKey = { viewModel.saveGeminiApiKey(context, it) },
                 onClearCache = { viewModel.clearCache(context) },
@@ -406,6 +438,7 @@ private fun screenTitle(screen: AppScreen, strings: AppStrings): String = when (
     AppScreen.SPLIT -> strings.tabSplit
     AppScreen.TRANSCRIPT -> strings.tabTranscript
     AppScreen.HISTORY -> strings.tabHistory
+    AppScreen.MERGE, AppScreen.EXTRACT_AUDIO, AppScreen.SPLIT_AUDIO, AppScreen.AUDIO_EDITOR -> strings.toolTitle(screen)
 }
 
 @Composable
@@ -479,7 +512,7 @@ fun TrimCompletionDialog(
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Text(
-                                text = strings.saveAllToGallery,
+                                text = strings.tool("Save all to media library", "រក្សាទុកទាំងអស់ក្នុងបណ្ណាល័យ"),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }
@@ -521,7 +554,7 @@ fun TrimCompletionDialog(
                                 modifier = Modifier.padding(end = 8.dp)
                             )
                             Text(
-                                text = strings.saveToGallery,
+                                text = strings.tool("Save to media library", "រក្សាទុកក្នុងបណ្ណាល័យ"),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }

@@ -307,89 +307,9 @@ object VideoProcessor {
         }
     }
 
-    suspend fun saveToGallery(context: Context, videoUri: Uri, title: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val resolver = context.contentResolver
-            val fileName = if (title.endsWith(".mp4")) title else "$title.mp4"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/TrimVideoPro")
-                    put(MediaStore.Video.Media.IS_PENDING, 1)
-                }
-            }
+    suspend fun saveToGallery(context: Context, videoUri: Uri, title: String): Boolean =
+        MediaExport.save(context, videoUri, title, downloads = false)
 
-            val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            val itemUri = resolver.insert(collection, contentValues) ?: return@withContext false
-
-            resolver.openOutputStream(itemUri)?.use { outStream ->
-                resolver.openInputStream(videoUri)?.use { inStream ->
-                    inStream.copyTo(outStream)
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                contentValues.clear()
-                contentValues.put(MediaStore.Video.Media.IS_PENDING, 0)
-                resolver.update(itemUri, contentValues, null, null)
-            } else {
-                val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                intent.data = itemUri
-                context.sendBroadcast(intent)
-            }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save video to Gallery", e)
-            false
-        }
-    }
-
-    suspend fun saveToPublicStorage(context: Context, videoUri: Uri, title: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val resolver = context.contentResolver
-            val fileName = if (title.endsWith(".mp4")) title else "$title.mp4"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/TrimVideoPro")
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-                val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                val itemUri = resolver.insert(collection, contentValues) ?: return@withContext false
-
-                resolver.openOutputStream(itemUri)?.use { outStream ->
-                    resolver.openInputStream(videoUri)?.use { inStream ->
-                        inStream.copyTo(outStream)
-                    }
-                }
-
-                contentValues.clear()
-                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(itemUri, contentValues, null, null)
-                true
-            } else {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val subDir = File(downloadsDir, "TrimVideoPro")
-                if (!subDir.exists()) subDir.mkdirs()
-                val destFile = File(subDir, fileName)
-
-                resolver.openInputStream(videoUri)?.use { inStream ->
-                    destFile.outputStream().use { outStream ->
-                        inStream.copyTo(outStream)
-                    }
-                }
-
-                val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                intent.data = Uri.fromFile(destFile)
-                context.sendBroadcast(intent)
-                true
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save video to Public Storage", e)
-            false
-        }
-    }
+    suspend fun saveToPublicStorage(context: Context, videoUri: Uri, title: String): Boolean =
+        MediaExport.save(context, videoUri, title, downloads = true)
 }

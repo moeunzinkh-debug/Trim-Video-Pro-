@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.trimvideopro.localization.AppLanguage
+import com.example.trimvideopro.localization.tool
 import com.example.trimvideopro.localization.LocalAppStrings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +39,8 @@ fun SettingsBottomSheet(
     onOpenFeedback: () -> Unit,
     onOpenAboutUs: () -> Unit,
     onDismiss: () -> Unit,
+    currentGroqKey: String = "",
+    onSaveGroqKey: (String) -> Unit = {},
     currentApiKey: String = "",
     onSaveApiKey: (String) -> Unit = {}
 ) {
@@ -131,6 +134,8 @@ fun SettingsBottomSheet(
                     }
                 }
             }
+
+            GroqKeySettings(currentGroqKey, onSaveGroqKey)
 
             // Gemini API key
             Column(
@@ -444,4 +449,33 @@ fun AboutUsDialog(
             }
         }
     )
+}
+
+@Composable
+private fun GroqKeySettings(currentKey: String, onSave: (String) -> Unit) {
+    val s = LocalAppStrings.current
+    var key by remember(currentKey) { mutableStateOf(currentKey) }
+    var visible by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Groq API", style = MaterialTheme.typography.titleMedium)
+            Text(s.tool("Used for Whisper Large v3 transcription and AI sound-setting suggestions. Saved privately on this device and excluded from backups. Clear the field and save to remove it.",
+                "ប្រើសម្រាប់ Whisper Large v3 និងការណែនាំសំឡេង AI។ រក្សាទុកឯកជនលើឧបករណ៍ និងមិនបញ្ចូលក្នុងការបម្រុងទុក។ លុបអត្ថបទ រួចរក្សាទុកដើម្បីដកសោចេញ។"),
+                style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(value = key, onValueChange = { key = it; saved = false }, label = { Text("Groq API key") },
+                singleLine = true, modifier = Modifier.fillMaxWidth().testTag("groq_api_key_input"),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { visible = !visible }) {
+                        Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, s.tool("Toggle key visibility", "បង្ហាញ / លាក់សោ"))
+                    }
+                })
+            Button(onClick = { onSave(key.trim()); saved = true }, modifier = Modifier.testTag("save_groq_api_key")) {
+                Text(s.saveApiKey)
+            }
+            if (saved) Text(if (key.isBlank()) s.apiKeyCleared else s.apiKeySaved)
+        }
+    }
 }

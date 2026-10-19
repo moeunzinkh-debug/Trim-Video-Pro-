@@ -193,6 +193,8 @@ fun SplitScreen(
 
 @Composable
 fun TranscriptScreen(
+    provider: com.example.trimvideopro.model.TranscriptProvider = com.example.trimvideopro.model.TranscriptProvider.GEMINI,
+    onProviderChange: (com.example.trimvideopro.model.TranscriptProvider) -> Unit = {},
     selectedVideoUri: Uri?,
     metadata: VideoMetadata?,
     isExtractingMetadata: Boolean,
@@ -229,6 +231,8 @@ fun TranscriptScreen(
             onRefresh = onRefresh,
             showPlayer = false
         )
+
+        TranscriptProviderSelector(provider, transcriptStatus, onProviderChange)
 
         if (selectedVideoUri != null) {
             TranscriptView(

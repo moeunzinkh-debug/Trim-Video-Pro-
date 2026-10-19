@@ -15,6 +15,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.QueuePlayNext
+import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ClosedCaption
@@ -41,6 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.trimvideopro.localization.tool
+import com.example.trimvideopro.localization.toolTitle
 import com.example.trimvideopro.localization.LocalAppStrings
 import com.example.ui.theme.AmberAccent
 
@@ -182,6 +188,27 @@ fun HomeScreen(
                     badgeText = if (exportedClipCount > 0) exportedClipCount.toString() else null,
                     onClick = { onOpenTool(AppScreen.HISTORY) }
                 )
+            }
+        }
+
+        listOf(
+            listOf(AppScreen.MERGE to Icons.Default.QueuePlayNext, AppScreen.EXTRACT_AUDIO to Icons.Default.AudioFile),
+            listOf(AppScreen.SPLIT_AUDIO to Icons.Default.LibraryMusic, AppScreen.AUDIO_EDITOR to Icons.Default.GraphicEq)
+        ).forEach { tools ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                tools.forEach { (screen, icon) ->
+                    FeatureCard(
+                        modifier = Modifier.weight(1f), icon = icon, title = strings.toolTitle(screen),
+                        description = when (screen) {
+                            AppScreen.MERGE -> strings.tool("Order and join video clips.", "រៀបលំដាប់ និងបញ្ចូលវីដេអូ។")
+                            AppScreen.EXTRACT_AUDIO -> strings.tool("Save a video's sound as WAV.", "រក្សាទុកសំឡេងវីដេអូជា WAV។")
+                            AppScreen.SPLIT_AUDIO -> strings.tool("Split by time or number of parts.", "បំបែកតាមពេល ឬចំនួនផ្នែក។")
+                            else -> strings.tool("Echo, EQ & AI sound suggestions.", "អេកូ EQ និងការណែនាំពី AI។")
+                        },
+                        accent = colors.secondary, testTag = "home_card_${screen.name.lowercase()}",
+                        onClick = { onOpenTool(screen) }
+                    )
+                }
             }
         }
 
