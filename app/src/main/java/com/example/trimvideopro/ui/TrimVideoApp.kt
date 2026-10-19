@@ -1,42 +1,35 @@
 package com.example.trimvideopro.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Collections
-import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material.icons.filled.ViewStream
-import androidx.compose.material.icons.filled.ClosedCaption
-import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,13 +38,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,12 +51,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,26 +65,24 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.trimvideopro.localization.AppLanguage
+import com.example.trimvideopro.localization.AppStrings
 import com.example.trimvideopro.localization.EnglishStrings
 import com.example.trimvideopro.localization.KhmerStrings
 import com.example.trimvideopro.localization.LocalAppStrings
 import com.example.trimvideopro.model.ProcessedVideo
-import com.example.trimvideopro.processor.VideoProcessor
 import com.example.trimvideopro.settings.AppPreferences
 import com.example.trimvideopro.ui.components.ApkBuildGuideDialog
-import com.example.trimvideopro.ui.components.AudioPlayerView
-import com.example.trimvideopro.ui.components.ExportHistoryView
-import com.example.trimvideopro.ui.components.SplitConfigView
-import com.example.trimvideopro.ui.components.TimelineTrimSlider
-import com.example.trimvideopro.ui.components.TranscriptView
-import com.example.trimvideopro.ui.components.VideoPlayerView
 
-enum class AppTab {
+/** Pages reachable from the home grid. */
+enum class AppScreen {
+    HOME,
     TRIM,
     SPLIT,
     TRANSCRIPT,
     HISTORY
 }
+
+private val MediaPickerMimeTypes = arrayOf("video/*", "audio/*")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,7 +93,13 @@ fun TrimVideoApp(
     val context = LocalContext.current
     val strings = if (state.language == AppLanguage.KHMER) KhmerStrings else EnglishStrings
 
-    var selectedTab by remember { mutableStateOf(AppTab.TRIM) }
+    // Lightweight in-app navigation: the home page is the hub and every tool
+    // opens on its own page. System back returns to the home page.
+    var currentScreenName by rememberSaveable { mutableStateOf(AppScreen.HOME.name) }
+    val currentScreen = remember(currentScreenName) {
+        runCatching { AppScreen.valueOf(currentScreenName) }.getOrDefault(AppScreen.HOME)
+    }
+    val navigateTo: (AppScreen) -> Unit = { currentScreenName = it.name }
 
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -116,323 +110,113 @@ fun TrimVideoApp(
     }
 
     CompositionLocalProvider(LocalAppStrings provides strings) {
+        BackHandler(enabled = currentScreen != AppScreen.HOME) {
+            navigateTo(AppScreen.HOME)
+        }
+
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = strings.appTitle,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = "Created by Moeun💞",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                            Text(
-                                text = strings.offlineBadge,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    actions = {
-                        // Language switch toggle button (EN / KM)
-                        IconButton(onClick = { viewModel.toggleLanguage() }) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                Text(
-                                    text = state.language.flag,
-                                    modifier = Modifier.padding(6.dp),
-                                    fontSize = 16.sp
-                                )
-                            }
-                        }
-
-                        // 🔄 REFRESH BUTTON
-                        IconButton(onClick = { viewModel.refreshState(context) }) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = strings.refresh,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        // ⚙️ SETTINGS BUTTON
-                        IconButton(
-                            onClick = { viewModel.toggleSettingsDialog(true) },
-                            modifier = Modifier.testTag("open_settings_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = strings.settings,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
+                AppTopBar(
+                    screen = currentScreen,
+                    strings = strings,
+                    language = state.language,
+                    onToggleLanguage = { viewModel.toggleLanguage() },
+                    onRefresh = { viewModel.refreshState(context) },
+                    onOpenSettings = { viewModel.toggleSettingsDialog(true) },
+                    onBack = { navigateTo(AppScreen.HOME) }
                 )
-            },
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = selectedTab == AppTab.TRIM,
-                        onClick = { selectedTab = AppTab.TRIM },
-                        icon = { Icon(Icons.Default.ContentCut, contentDescription = null) },
-                        label = { Text(strings.tabTrim, fontSize = 12.sp) }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == AppTab.SPLIT,
-                        onClick = { selectedTab = AppTab.SPLIT },
-                        icon = { Icon(Icons.Default.ViewStream, contentDescription = null) },
-                        label = { Text(strings.tabSplit, fontSize = 12.sp) }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == AppTab.TRANSCRIPT,
-                        onClick = { selectedTab = AppTab.TRANSCRIPT },
-                        icon = { Icon(Icons.Default.ClosedCaption, contentDescription = null) },
-                        label = { Text(strings.tabTranscript, fontSize = 12.sp) }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == AppTab.HISTORY,
-                        onClick = { selectedTab = AppTab.HISTORY },
-                        icon = { Icon(Icons.Default.Movie, contentDescription = null) },
-                        label = { Text("${strings.tabHistory} (${state.exportedVideos.size})", fontSize = 12.sp) }
-                    )
-                }
             }
         ) { paddingValues ->
-            Column(
+            AnimatedContent(
+                targetState = currentScreen,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Video Pick / Overview Section
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (state.selectedVideoUri == null) {
-                            // Pick video CTA
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.VideoLibrary,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = strings.selectVideo,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Button(
-                                    onClick = { mediaPickerLauncher.launch(arrayOf("video/*", "audio/*")) },
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FolderOpen,
-                                        contentDescription = null,
-                                        modifier = Modifier.padding(end = 8.dp)
-                                    )
-                                    Text(strings.selectVideo)
-                                }
-                            }
-                        } else {
-                            // Video Details & Player
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = state.metadata?.fileName ?: "Selected Video",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        maxLines = 1
-                                    )
-                                    state.metadata?.let { meta ->
-                                        Text(
-                                            text = if (meta.mimeType.startsWith("audio/")) {
-                                                "Audio • ${VideoProcessor.formatDuration(meta.durationMs)} • ${VideoProcessor.formatFileSize(meta.fileSize)}"
-                                            } else {
-                                                "${VideoProcessor.formatDuration(meta.durationMs)} • ${meta.width}x${meta.height} • ${VideoProcessor.formatFileSize(meta.fileSize)}"
-                                            },
-                                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-
-                                Row {
-                                    IconButton(onClick = { viewModel.refreshState(context) }) {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = strings.refresh,
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = { mediaPickerLauncher.launch(arrayOf("video/*", "audio/*")) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text(strings.changeVideo, fontSize = 12.sp)
-                                    }
-                                }
-                            }
-
-                            if (state.isExtractingMetadata) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(180.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator()
-                                }
-                            } else {
-                                if (state.metadata?.mimeType?.startsWith("audio/") == true) {
-                                    AudioPlayerView(
-                                        audioUri = state.selectedVideoUri!!,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                } else {
-                                    VideoPlayerView(
-                                        videoUri = state.selectedVideoUri!!,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Main Tab Content
-                when (selectedTab) {
-                    AppTab.TRIM -> {
-                        if (state.selectedVideoUri != null && state.metadata != null) {
-                            TimelineTrimSlider(
-                                totalDurationMs = state.metadata!!.durationMs,
-                                startMs = state.trimStartMs,
-                                endMs = state.trimEndMs,
-                                onRangeChange = { start, end ->
-                                    viewModel.updateTrimRange(start, end)
-                                },
-                                onAdjustStart = { delta -> viewModel.adjustTrimStart(delta) },
-                                onAdjustEnd = { delta -> viewModel.adjustTrimEnd(delta) }
-                            )
-
-                            Button(
-                                onClick = { viewModel.executeTrim(context) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                enabled = !state.isProcessing
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCut,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(end = 8.dp)
-                                )
-                                Text(
-                                    text = strings.trimVideo,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                    }
-
-                    AppTab.SPLIT -> {
-                        if (state.selectedVideoUri != null && state.metadata != null) {
-                            SplitConfigView(
-                                splitMode = state.splitMode,
-                                intervalSec = state.splitIntervalSec,
-                                partsCount = state.splitPartsCount,
-                                calculatedSegments = state.calculatedSegments,
-                                onModeChange = { viewModel.setSplitMode(it) },
-                                onIntervalChange = { viewModel.setSplitIntervalSec(it) },
-                                onPartsChange = { viewModel.setSplitPartsCount(it) }
-                            )
-
-                            Button(
-                                onClick = { viewModel.executeSplit(context) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                enabled = !state.isProcessing && state.calculatedSegments.isNotEmpty()
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ViewStream,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(end = 8.dp)
-                                )
-                                Text(
-                                    text = "${strings.splitVideo} (${state.calculatedSegments.size} ${strings.clipPrefix})",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                    }
-
-                    AppTab.TRANSCRIPT -> {
-                        if (state.selectedVideoUri != null) {
-                            TranscriptView(
-                                transcript = state.transcript,
-                                transcriptStatus = state.transcriptStatus,
-                                transcriptProgress = state.transcriptProgress,
-                                transcriptProgressMessage = state.transcriptProgressMessage,
-                                selectedChunk = state.selectedTranscriptChunk,
-                                onGenerateTranscript = { language ->
-                                    viewModel.generateTranscript(context, language)
-                                },
-                                onChunkSelected = { chunk ->
-                                    viewModel.selectTranscriptChunk(chunk)
-                                    // Update trim range to the selected chunk's timestamps
-                                    viewModel.updateTrimRange(chunk.startMs, chunk.endMs)
-                                },
-                                onExportSrt = { viewModel.exportTranscriptToSrt(context) },
-                                onExportVtt = { viewModel.exportTranscriptToVtt(context) },
-                                onExportText = { viewModel.exportTranscriptToText(context) },
-                                onShare = { viewModel.shareTranscript(context) }
-                            )
-                        }
-                    }
-
-                    AppTab.HISTORY -> {
-                        ExportHistoryView(
-                            videos = state.exportedVideos,
-                            onDeleteVideo = { viewModel.deleteExportedVideo(it) },
-                            onClearAll = { viewModel.clearAllExportedVideos(context) },
-                            onSaveToGallery = { video -> viewModel.saveVideoToGallery(context, video) },
-                            onSaveToStorage = { video -> viewModel.saveVideoToStorage(context, video) },
-                            onSaveAllToGallery = { viewModel.saveAllToGallery(context, state.exportedVideos) },
-                            onSaveAllToStorage = { viewModel.saveAllToStorage(context, state.exportedVideos) }
+                    .padding(paddingValues),
+                transitionSpec = {
+                    if (targetState.ordinal > initialState.ordinal) {
+                        (slideInHorizontally { it / 8 } + fadeIn()).togetherWith(
+                            slideOutHorizontally { -it / 8 } + fadeOut()
+                        )
+                    } else {
+                        (slideInHorizontally { -it / 8 } + fadeIn()).togetherWith(
+                            slideOutHorizontally { it / 8 } + fadeOut()
                         )
                     }
+                },
+                label = "app_screen"
+            ) { targetScreen ->
+                when (targetScreen) {
+                    AppScreen.HOME -> HomeScreen(
+                        exportedClipCount = state.exportedVideos.size,
+                        onOpenTool = navigateTo
+                    )
+
+                    AppScreen.TRIM -> TrimScreen(
+                        selectedVideoUri = state.selectedVideoUri,
+                        metadata = state.metadata,
+                        isExtractingMetadata = state.isExtractingMetadata,
+                        trimStartMs = state.trimStartMs,
+                        trimEndMs = state.trimEndMs,
+                        isProcessing = state.isProcessing,
+                        onPickMedia = { mediaPickerLauncher.launch(MediaPickerMimeTypes) },
+                        onRefresh = { viewModel.refreshState(context) },
+                        onRangeChange = { start, end -> viewModel.updateTrimRange(start, end) },
+                        onAdjustStart = { delta -> viewModel.adjustTrimStart(delta) },
+                        onAdjustEnd = { delta -> viewModel.adjustTrimEnd(delta) },
+                        onTrim = { viewModel.executeTrim(context) }
+                    )
+
+                    AppScreen.SPLIT -> SplitScreen(
+                        selectedVideoUri = state.selectedVideoUri,
+                        metadata = state.metadata,
+                        isExtractingMetadata = state.isExtractingMetadata,
+                        splitMode = state.splitMode,
+                        splitIntervalSec = state.splitIntervalSec,
+                        splitPartsCount = state.splitPartsCount,
+                        calculatedSegments = state.calculatedSegments,
+                        isProcessing = state.isProcessing,
+                        onPickMedia = { mediaPickerLauncher.launch(MediaPickerMimeTypes) },
+                        onRefresh = { viewModel.refreshState(context) },
+                        onModeChange = { viewModel.setSplitMode(it) },
+                        onIntervalChange = { viewModel.setSplitIntervalSec(it) },
+                        onPartsChange = { viewModel.setSplitPartsCount(it) },
+                        onSplit = { viewModel.executeSplit(context) }
+                    )
+
+                    AppScreen.TRANSCRIPT -> TranscriptScreen(
+                        selectedVideoUri = state.selectedVideoUri,
+                        metadata = state.metadata,
+                        isExtractingMetadata = state.isExtractingMetadata,
+                        transcript = state.transcript,
+                        transcriptStatus = state.transcriptStatus,
+                        transcriptProgress = state.transcriptProgress,
+                        transcriptProgressMessage = state.transcriptProgressMessage,
+                        selectedChunk = state.selectedTranscriptChunk,
+                        onPickMedia = { mediaPickerLauncher.launch(MediaPickerMimeTypes) },
+                        onRefresh = { viewModel.refreshState(context) },
+                        onGenerateTranscript = { language ->
+                            viewModel.generateTranscript(context, language)
+                        },
+                        onChunkSelected = { chunk ->
+                            viewModel.selectTranscriptChunk(chunk)
+                            // Jump the trim range to the selected chunk's timestamps
+                            viewModel.updateTrimRange(chunk.startMs, chunk.endMs)
+                        },
+                        onExportSrt = { viewModel.exportTranscriptToSrt(context) },
+                        onExportVtt = { viewModel.exportTranscriptToVtt(context) },
+                        onExportText = { viewModel.exportTranscriptToText(context) },
+                        onShareTranscript = { viewModel.shareTranscript(context) }
+                    )
+
+                    AppScreen.HISTORY -> HistoryScreen(
+                        videos = state.exportedVideos,
+                        onDeleteVideo = { viewModel.deleteExportedVideo(it) },
+                        onClearAll = { viewModel.clearAllExportedVideos(context) },
+                        onSaveToGallery = { video -> viewModel.saveVideoToGallery(context, video) },
+                        onSaveToStorage = { video -> viewModel.saveVideoToStorage(context, video) },
+                        onSaveAllToGallery = { viewModel.saveAllToGallery(context, state.exportedVideos) },
+                        onSaveAllToStorage = { viewModel.saveAllToStorage(context, state.exportedVideos) }
+                    )
                 }
             }
         }
@@ -527,6 +311,103 @@ fun TrimVideoApp(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppTopBar(
+    screen: AppScreen,
+    strings: AppStrings,
+    language: AppLanguage,
+    onToggleLanguage: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onBack: () -> Unit
+) {
+    TopAppBar(
+        navigationIcon = {
+            if (screen != AppScreen.HOME) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.testTag("back_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = strings.back
+                    )
+                }
+            }
+        },
+        title = {
+            Column {
+                Text(
+                    text = screenTitle(screen, strings),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    maxLines = 1
+                )
+                if (screen == AppScreen.HOME) {
+                    Text(
+                        text = "Created by Moeun💞",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                Text(
+                    text = strings.offlineBadge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+        },
+        actions = {
+            // Language switch toggle button (EN / KM)
+            IconButton(onClick = onToggleLanguage) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = language.flag,
+                        modifier = Modifier.padding(6.dp),
+                        fontSize = 16.sp
+                    )
+                }
+            }
+
+            // 🔄 REFRESH BUTTON
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = strings.refresh,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // ⚙️ SETTINGS BUTTON
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.testTag("open_settings_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = strings.settings,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    )
+}
+
+private fun screenTitle(screen: AppScreen, strings: AppStrings): String = when (screen) {
+    AppScreen.HOME -> strings.appTitle
+    AppScreen.TRIM -> strings.tabTrim
+    AppScreen.SPLIT -> strings.tabSplit
+    AppScreen.TRANSCRIPT -> strings.tabTranscript
+    AppScreen.HISTORY -> strings.tabHistory
+}
+
 @Composable
 fun TrimCompletionDialog(
     videos: List<ProcessedVideo>,
@@ -536,9 +417,7 @@ fun TrimCompletionDialog(
     onSaveAllToStorage: (() -> Unit)?,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
     val strings = LocalAppStrings.current
-    var playingUri by remember { mutableStateOf<Uri?>(null) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
